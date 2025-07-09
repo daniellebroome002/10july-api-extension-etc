@@ -104,8 +104,9 @@ const RATE_LIMIT = {
 
 // Rate limit middleware
 export function rateLimitMiddleware(req, res, next) {
-  // Get client IP
-  const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+  // Get client IP with better detection
+  const clientIp = getClientIP(req);
+  console.log(`Rate limit check for IP: ${clientIp}`); // Debug log
   
   const now = Date.now();
   
@@ -129,6 +130,8 @@ export function rateLimitMiddleware(req, res, next) {
     if (rateLimitStore.userLimits[userId].count > RATE_LIMIT.AUTH_MAX_EMAILS_PER_HOUR) {
       rateLimitStore.userLimits[userId].captchaRequired = true;
     }
+    
+    console.log(`User ${userId} - Count: ${rateLimitStore.userLimits[userId].count}, CAPTCHA required: ${rateLimitStore.userLimits[userId].captchaRequired}`);
     
     // Add rateLimitInfo to request for use in route handlers
     req.rateLimitInfo = {
@@ -161,6 +164,8 @@ export function rateLimitMiddleware(req, res, next) {
     // Don't block the request - we'll check for CAPTCHA in the route handler
   }
   
+  console.log(`IP ${clientIp} - Count: ${rateLimitStore.limits[clientIp].count}, CAPTCHA required: ${rateLimitStore.limits[clientIp].captchaRequired}`);
+  
   // Add rateLimitInfo to request for use in route handlers
   req.rateLimitInfo = {
     current: rateLimitStore.limits[clientIp].count,
@@ -172,9 +177,30 @@ export function rateLimitMiddleware(req, res, next) {
   next();
 }
 
+// Helper function to get client IP reliably
+function getClientIP(req) {
+  // Check various headers in order of priority
+  const xForwardedFor = req.headers['x-forwarded-for'];
+  const xRealIp = req.headers['x-real-ip'];
+  const cfConnectingIp = req.headers['cf-connecting-ip']; // Cloudflare
+  
+  // Handle x-forwarded-for (can contain multiple IPs)
+  if (xForwardedFor) {
+    const ips = xForwardedFor.split(',').map(ip => ip.trim());
+    return ips[0]; // First IP is the original client
+  }
+  
+  // Handle other headers
+  if (xRealIp) return xRealIp;
+  if (cfConnectingIp) return cfConnectingIp;
+  
+  // Fallback to connection remote address
+  return req.connection?.remoteAddress || req.socket?.remoteAddress || req.ip || '127.0.0.1';
+}
+
 // Verify captcha middleware
 export async function verifyCaptcha(req, res, next) {
-  const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+  const clientIp = getClientIP(req);
   
   // Check if captcha is required
   let isCaptchaRequired = false;
@@ -187,6 +213,8 @@ export async function verifyCaptcha(req, res, next) {
     // For anonymous users
     isCaptchaRequired = rateLimitStore.limits[clientIp]?.captchaRequired || false;
   }
+  
+  console.log(`CAPTCHA verification for IP ${clientIp}: required=${isCaptchaRequired}, has response=${!!req.body.captchaResponse}`);
   
   if (!isCaptchaRequired) {
     return next();
@@ -210,6 +238,7 @@ export async function verifyCaptcha(req, res, next) {
     const data = response.data;
     
     if (data.success) {
+      console.log(`CAPTCHA verification successful for IP ${clientIp}`);
       // CAPTCHA verification successful, reset rate limit counter
       if (req.user) {
         // For authenticated users
@@ -229,6 +258,7 @@ export async function verifyCaptcha(req, res, next) {
       // Proceed with request
       next();
     } else {
+      console.log(`CAPTCHA verification failed for IP ${clientIp}:`, data);
       return res.status(400).json({ error: 'INVALID_CAPTCHA', message: 'CAPTCHA verification failed' });
     }
   } catch (error) {
@@ -245,7 +275,7 @@ export function getCurrentCaptchaSiteKey() {
 
 // Middleware to check if CAPTCHA is required and provide site key
 export function checkCaptchaRequired(req, res, next) {
-  const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+  const clientIp = getClientIP(req);
   
   // Get rate limit info for the appropriate entity (user or IP)
   let isCaptchaRequired = false;
@@ -258,6 +288,8 @@ export function checkCaptchaRequired(req, res, next) {
     // For anonymous users
     isCaptchaRequired = rateLimitStore.limits[clientIp]?.captchaRequired || false;
   }
+  
+  console.log(`CAPTCHA check for IP ${clientIp}: required=${isCaptchaRequired}`);
   
   // Add CAPTCHA info to the response
   res.locals.captchaRequired = isCaptchaRequired;
