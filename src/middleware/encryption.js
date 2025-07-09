@@ -113,6 +113,11 @@ const shouldEncryptRoute = (req) => {
   if (path.includes('/received')) {
     return false;
   }
+
+  // Skip public email endpoints so the browser extension can consume plain JSON
+  if (path.startsWith('/emails/public')) {
+    return false;
+  }
   
   // Check if route matches our encryption targets
   return ROUTES_TO_ENCRYPT.some(route => {
