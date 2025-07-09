@@ -110,68 +110,41 @@ export function rateLimitMiddleware(req, res, next) {
   
   const now = Date.now();
   
-  // Handle authenticated users with separate limits
-  if (req.user) {
-    const userId = req.user.id;
-    
-    // Initialize or reset expired limit for this user
-    if (!rateLimitStore.userLimits[userId] || rateLimitStore.userLimits[userId].resetAt < now) {
-      rateLimitStore.userLimits[userId] = {
-        count: 0,
-        resetAt: now + RATE_LIMIT.WINDOW_MS,
-        captchaRequired: false
-      };
-    }
-    
-    // Increment count for this user
-    rateLimitStore.userLimits[userId].count++;
-    
-    // Check if rate limit is exceeded for authenticated user
-    if (rateLimitStore.userLimits[userId].count > RATE_LIMIT.AUTH_MAX_EMAILS_PER_HOUR) {
-      rateLimitStore.userLimits[userId].captchaRequired = true;
-    }
-    
-    console.log(`User ${userId} - Count: ${rateLimitStore.userLimits[userId].count}, CAPTCHA required: ${rateLimitStore.userLimits[userId].captchaRequired}`);
-    
-    // Add rateLimitInfo to request for use in route handlers
-    req.rateLimitInfo = {
-      current: rateLimitStore.userLimits[userId].count,
-      limit: RATE_LIMIT.AUTH_MAX_EMAILS_PER_HOUR,
-      captchaRequired: rateLimitStore.userLimits[userId].captchaRequired,
-      resetAt: rateLimitStore.userLimits[userId].resetAt
-    };
-    
-    return next();
-  }
+  // HYBRID APPROACH: Use IP for guests, userID for authenticated users
+  const isGuestUser = !req.user || req.user.isGuest;
+  const rateLimitKey = isGuestUser ? clientIp : req.user.id;
+  const rateLimitStore_target = isGuestUser ? rateLimitStore.limits : rateLimitStore.userLimits;
+  const maxEmails = isGuestUser ? RATE_LIMIT.MAX_EMAILS_PER_HOUR : RATE_LIMIT.AUTH_MAX_EMAILS_PER_HOUR;
   
-  // Handle anonymous users (original logic)
-  // Initialize or reset expired limit for this IP
-  if (!rateLimitStore.limits[clientIp] || rateLimitStore.limits[clientIp].resetAt < now) {
-    rateLimitStore.limits[clientIp] = {
+  console.log(`Rate limiting by ${isGuestUser ? 'IP' : 'UserID'}: ${rateLimitKey}`);
+  
+  // Initialize or reset expired limit for this key
+  if (!rateLimitStore_target[rateLimitKey] || rateLimitStore_target[rateLimitKey].resetAt < now) {
+    rateLimitStore_target[rateLimitKey] = {
       count: 0,
       resetAt: now + RATE_LIMIT.WINDOW_MS,
       captchaRequired: false
     };
   }
   
-  // Increment count for this IP
-  rateLimitStore.limits[clientIp].count++;
+  // Increment count for this key
+  rateLimitStore_target[rateLimitKey].count++;
   
   // Check if rate limit is exceeded
-  if (rateLimitStore.limits[clientIp].count > RATE_LIMIT.MAX_EMAILS_PER_HOUR) {
-    rateLimitStore.limits[clientIp].captchaRequired = true;
-    
-    // Don't block the request - we'll check for CAPTCHA in the route handler
+  if (rateLimitStore_target[rateLimitKey].count > maxEmails) {
+    rateLimitStore_target[rateLimitKey].captchaRequired = true;
   }
   
-  console.log(`IP ${clientIp} - Count: ${rateLimitStore.limits[clientIp].count}, CAPTCHA required: ${rateLimitStore.limits[clientIp].captchaRequired}`);
+  console.log(`${isGuestUser ? 'IP' : 'User'} ${rateLimitKey} - Count: ${rateLimitStore_target[rateLimitKey].count}/${maxEmails}, CAPTCHA required: ${rateLimitStore_target[rateLimitKey].captchaRequired}`);
   
   // Add rateLimitInfo to request for use in route handlers
   req.rateLimitInfo = {
-    current: rateLimitStore.limits[clientIp].count,
-    limit: RATE_LIMIT.MAX_EMAILS_PER_HOUR,
-    captchaRequired: rateLimitStore.limits[clientIp].captchaRequired,
-    resetAt: rateLimitStore.limits[clientIp].resetAt
+    current: rateLimitStore_target[rateLimitKey].count,
+    limit: maxEmails,
+    captchaRequired: rateLimitStore_target[rateLimitKey].captchaRequired,
+    resetAt: rateLimitStore_target[rateLimitKey].resetAt,
+    isGuestUser,
+    rateLimitKey
   };
   
   next();
@@ -202,19 +175,15 @@ function getClientIP(req) {
 export async function verifyCaptcha(req, res, next) {
   const clientIp = getClientIP(req);
   
+  // HYBRID APPROACH: Use IP for guests, userID for authenticated users
+  const isGuestUser = !req.user || req.user.isGuest;
+  const rateLimitKey = isGuestUser ? clientIp : req.user.id;
+  const rateLimitStore_target = isGuestUser ? rateLimitStore.limits : rateLimitStore.userLimits;
+  
   // Check if captcha is required
-  let isCaptchaRequired = false;
+  const isCaptchaRequired = rateLimitStore_target[rateLimitKey]?.captchaRequired || false;
   
-  if (req.user) {
-    // For authenticated users
-    const userId = req.user.id;
-    isCaptchaRequired = rateLimitStore.userLimits[userId]?.captchaRequired || false;
-  } else {
-    // For anonymous users
-    isCaptchaRequired = rateLimitStore.limits[clientIp]?.captchaRequired || false;
-  }
-  
-  console.log(`CAPTCHA verification for IP ${clientIp}: required=${isCaptchaRequired}, has response=${!!req.body.captchaResponse}`);
+  console.log(`CAPTCHA verification for ${isGuestUser ? 'IP' : 'User'} ${rateLimitKey}: required=${isCaptchaRequired}, has response=${!!req.body.captchaResponse}`);
   
   if (!isCaptchaRequired) {
     return next();
@@ -223,8 +192,11 @@ export async function verifyCaptcha(req, res, next) {
   // Get captcha response from request
   const captchaResponse = req.body.captchaResponse;
   
+  // If CAPTCHA is required but client hasn't supplied a response yet, let the
+  // request continue to the route handler. The handler will return the full
+  // payload (including captchaSiteKey) so the client can render the widget.
   if (!captchaResponse) {
-    return res.status(400).json({ error: 'CAPTCHA_REQUIRED', message: 'CAPTCHA verification required' });
+    return next();
   }
   
   try {
@@ -238,27 +210,17 @@ export async function verifyCaptcha(req, res, next) {
     const data = response.data;
     
     if (data.success) {
-      console.log(`CAPTCHA verification successful for IP ${clientIp}`);
+      console.log(`CAPTCHA verification successful for ${isGuestUser ? 'IP' : 'User'} ${rateLimitKey}`);
       // CAPTCHA verification successful, reset rate limit counter
-      if (req.user) {
-        // For authenticated users
-        const userId = req.user.id;
-        if (rateLimitStore.userLimits[userId]) {
-          rateLimitStore.userLimits[userId].count = 0; // Reset counter
-          rateLimitStore.userLimits[userId].captchaRequired = false; // No longer require CAPTCHA
-        }
-      } else {
-        // For anonymous users
-        if (rateLimitStore.limits[clientIp]) {
-          rateLimitStore.limits[clientIp].count = 0; // Reset counter
-          rateLimitStore.limits[clientIp].captchaRequired = false; // No longer require CAPTCHA
-        }
+      if (rateLimitStore_target[rateLimitKey]) {
+        rateLimitStore_target[rateLimitKey].count = 0; // Reset counter
+        rateLimitStore_target[rateLimitKey].captchaRequired = false; // No longer require CAPTCHA
       }
       
       // Proceed with request
       next();
     } else {
-      console.log(`CAPTCHA verification failed for IP ${clientIp}:`, data);
+      console.log(`CAPTCHA verification failed for ${isGuestUser ? 'IP' : 'User'} ${rateLimitKey}:`, data);
       return res.status(400).json({ error: 'INVALID_CAPTCHA', message: 'CAPTCHA verification failed' });
     }
   } catch (error) {
@@ -277,19 +239,15 @@ export function getCurrentCaptchaSiteKey() {
 export function checkCaptchaRequired(req, res, next) {
   const clientIp = getClientIP(req);
   
-  // Get rate limit info for the appropriate entity (user or IP)
-  let isCaptchaRequired = false;
+  // HYBRID APPROACH: Use IP for guests, userID for authenticated users
+  const isGuestUser = !req.user || req.user.isGuest;
+  const rateLimitKey = isGuestUser ? clientIp : req.user.id;
+  const rateLimitStore_target = isGuestUser ? rateLimitStore.limits : rateLimitStore.userLimits;
   
-  if (req.user) {
-    // For authenticated users
-    const userId = req.user.id;
-    isCaptchaRequired = rateLimitStore.userLimits[userId]?.captchaRequired || false;
-  } else {
-    // For anonymous users
-    isCaptchaRequired = rateLimitStore.limits[clientIp]?.captchaRequired || false;
-  }
+  // Get rate limit info for the appropriate entity
+  const isCaptchaRequired = rateLimitStore_target[rateLimitKey]?.captchaRequired || false;
   
-  console.log(`CAPTCHA check for IP ${clientIp}: required=${isCaptchaRequired}`);
+  console.log(`CAPTCHA check for ${isGuestUser ? 'IP' : 'User'} ${rateLimitKey}: required=${isCaptchaRequired}`);
   
   // Add CAPTCHA info to the response
   res.locals.captchaRequired = isCaptchaRequired;
