@@ -727,16 +727,30 @@ router.post('/:tempEmailId/received/bulk/delete', authenticateToken, async (req,
 router.get('/debug/rate-limit', async (req, res) => {
   try {
     const clientIp = getClientIP(req);
-    const ipLimits = rateLimitStore.limits[clientIp];
+    const isGuestUser = !req.user || req.user.isGuest;
+    const rateLimitKey = isGuestUser ? clientIp : req.user.id;
+    const rateLimitStore_target = isGuestUser ? rateLimitStore.limits : rateLimitStore.userLimits;
+    
+    const currentLimits = rateLimitStore_target[rateLimitKey];
     
     res.json({
+      hybrid: {
+        isGuestUser,
+        rateLimitKey,
+        currentLimits: currentLimits || null
+      },
       clientIp,
-      limits: ipLimits || null,
-      allIPs: Object.keys(rateLimitStore.limits).map(ip => ({
+      allIPLimits: Object.keys(rateLimitStore.limits).map(ip => ({
         ip,
         count: rateLimitStore.limits[ip].count,
         captchaRequired: rateLimitStore.limits[ip].captchaRequired,
         resetAt: new Date(rateLimitStore.limits[ip].resetAt)
+      })),
+      allUserLimits: Object.keys(rateLimitStore.userLimits).map(userId => ({
+        userId,
+        count: rateLimitStore.userLimits[userId].count,
+        captchaRequired: rateLimitStore.userLimits[userId].captchaRequired,
+        resetAt: new Date(rateLimitStore.userLimits[userId].resetAt)
       }))
     });
   } catch (error) {
