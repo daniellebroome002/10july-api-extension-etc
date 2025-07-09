@@ -26,6 +26,27 @@ import {
 
 const router = express.Router();
 
+// Helper function to get client IP reliably (same as in rateLimit.js)
+function getClientIP(req) {
+  // Check various headers in order of priority
+  const xForwardedFor = req.headers['x-forwarded-for'];
+  const xRealIp = req.headers['x-real-ip'];
+  const cfConnectingIp = req.headers['cf-connecting-ip']; // Cloudflare
+  
+  // Handle x-forwarded-for (can contain multiple IPs)
+  if (xForwardedFor) {
+    const ips = xForwardedFor.split(',').map(ip => ip.trim());
+    return ips[0]; // First IP is the original client
+  }
+  
+  // Handle other headers
+  if (xRealIp) return xRealIp;
+  if (cfConnectingIp) return cfConnectingIp;
+  
+  // Fallback to connection remote address
+  return req.connection?.remoteAddress || req.socket?.remoteAddress || req.ip || '127.0.0.1';
+}
+
 // Get a specific temporary email
 router.get('/:id', authenticateAnyToken, async (req, res) => {
   try {
@@ -702,6 +723,28 @@ router.post('/:tempEmailId/received/bulk/delete', authenticateToken, async (req,
   }
 });
 
+// Debug endpoint to check rate limit status
+router.get('/debug/rate-limit', async (req, res) => {
+  try {
+    const clientIp = getClientIP(req);
+    const ipLimits = rateLimitStore.limits[clientIp];
+    
+    res.json({
+      clientIp,
+      limits: ipLimits || null,
+      allIPs: Object.keys(rateLimitStore.limits).map(ip => ({
+        ip,
+        count: rateLimitStore.limits[ip].count,
+        captchaRequired: rateLimitStore.limits[ip].captchaRequired,
+        resetAt: new Date(rateLimitStore.limits[ip].resetAt)
+      }))
+    });
+  } catch (error) {
+    console.error('Debug rate limit error:', error);
+    res.status(500).json({ error: 'Failed to get rate limit info' });
+  }
+});
+
 // Get public emails (no auth required)
 router.get('/public/:email', async (req, res) => {
   try {
@@ -741,14 +784,8 @@ router.post('/public/create', rateLimitMiddleware, checkCaptchaRequired, verifyC
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + 48);
     
-    // If CAPTCHA was provided and successfully verified, reset rate limit counter
-    const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
-    if (req.body.captchaResponse) {
-      if (rateLimitStore.limits[clientIp]) {
-        rateLimitStore.limits[clientIp].count = 0; // Reset counter
-        rateLimitStore.limits[clientIp].captchaRequired = false; // No longer require CAPTCHA
-      }
-    }
+    // Get client IP for logging
+    const clientIp = getClientIP(req);
 
     // Start transaction
     const connection = await pool.getConnection();
@@ -776,6 +813,7 @@ router.post('/public/create', rateLimitMiddleware, checkCaptchaRequired, verifyC
         [id]
       );
 
+      console.log(`Email created successfully for IP ${clientIp}: ${email}`);
       res.json(createdEmail[0]);
     } catch (error) {
       await connection.rollback();
