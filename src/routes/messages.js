@@ -17,9 +17,9 @@ router.get('/', authenticateToken, async (req, res) => {
   try {
     const userId = req.user?.id || 'anonymous';
     
-    const [messages] = await connection.query(`
+    const [rows] = await connection.query(`
       SELECT m.*, 
-             CASE WHEN udm.user_id IS NOT NULL THEN TRUE ELSE FALSE END as dismissed
+             IF(udm.user_id IS NULL, 0, 1) AS dismissed
       FROM custom_messages m
       LEFT JOIN user_dismissed_messages udm 
         ON m.id = udm.message_id 
@@ -27,6 +27,12 @@ router.get('/', authenticateToken, async (req, res) => {
       WHERE m.is_active = TRUE
       ORDER BY m.created_at DESC
     `, [userId]);
+
+    // Convert numeric 0/1 to strict boolean so frontend receives true / false
+    const messages = rows.map(row => ({
+      ...row,
+      dismissed: Boolean(row.dismissed)
+    }));
 
     res.json(messages);
   } catch (error) {
