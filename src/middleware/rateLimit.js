@@ -244,6 +244,8 @@ export function checkCaptchaRequired(req, res, next) {
   const clientIp = getClientIP(req);
   
   // Check BOTH buckets – IP and (if present) user – so siteKey is sent whenever ANY bucket is blocked
+  const isGuestUser = !req.user || req.user.isGuest;
+  const rateLimitKey = isGuestUser ? clientIp : req.user.id;
   const ipInfo = rateLimitStore.limits[clientIp] || {};
   const userInfo = req.user ? (rateLimitStore.userLimits[req.user.id] || {}) : {};
   const isCaptchaRequired = ipInfo.captchaRequired || userInfo.captchaRequired || false;
