@@ -308,6 +308,18 @@ router.get('/:id/received', authenticateAnyToken, async (req, res) => {
 router.post('/create', authenticateAnyToken, rateLimitMiddleware, checkCaptchaRequired, verifyCaptcha, customDomainRateLimitMiddleware, async (req, res) => {
   try {
     const { email, domainId, expiresAt, captchaResponse } = req.body;
+
+    // === CAPTCHA guard for authenticated/guest requests ===
+    // If rateLimitMiddleware marked this request as requiring CAPTCHA but the
+    // client did not supply a captchaResponse token, return the standard payload
+    if (res.locals.captchaRequired && !captchaResponse) {
+      return res.status(400).json({
+        error: 'CAPTCHA_REQUIRED',
+        captchaRequired: true,
+        captchaSiteKey: res.locals.captchaSiteKey,
+        message: 'You have exceeded the rate limit. Please complete the CAPTCHA.'
+      });
+    }
     
     // Validate the required fields
     if (!email || !domainId) {
