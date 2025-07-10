@@ -211,10 +211,14 @@ export async function verifyCaptcha(req, res, next) {
     
     if (data.success) {
       console.log(`CAPTCHA verification successful for ${isGuestUser ? 'IP' : 'User'} ${rateLimitKey}`);
-      // CAPTCHA verification successful, reset rate limit counter
-      if (rateLimitStore_target[rateLimitKey]) {
-        rateLimitStore_target[rateLimitKey].count = 0; // Reset counter
-        rateLimitStore_target[rateLimitKey].captchaRequired = false; // No longer require CAPTCHA
+      // Reset BOTH buckets (IP + user) so captcha isn't requested again immediately
+      if (rateLimitStore.limits[clientIp]) {
+        rateLimitStore.limits[clientIp].count = 0;
+        rateLimitStore.limits[clientIp].captchaRequired = false;
+      }
+      if (req.user && rateLimitStore.userLimits[req.user.id]) {
+        rateLimitStore.userLimits[req.user.id].count = 0;
+        rateLimitStore.userLimits[req.user.id].captchaRequired = false;
       }
       
       // Proceed with request
@@ -239,13 +243,10 @@ export function getCurrentCaptchaSiteKey() {
 export function checkCaptchaRequired(req, res, next) {
   const clientIp = getClientIP(req);
   
-  // HYBRID APPROACH: Use IP for guests, userID for authenticated users
-  const isGuestUser = !req.user || req.user.isGuest;
-  const rateLimitKey = isGuestUser ? clientIp : req.user.id;
-  const rateLimitStore_target = isGuestUser ? rateLimitStore.limits : rateLimitStore.userLimits;
-  
-  // Get rate limit info for the appropriate entity
-  const isCaptchaRequired = rateLimitStore_target[rateLimitKey]?.captchaRequired || false;
+  // Check BOTH buckets – IP and (if present) user – so siteKey is sent whenever ANY bucket is blocked
+  const ipInfo = rateLimitStore.limits[clientIp] || {};
+  const userInfo = req.user ? (rateLimitStore.userLimits[req.user.id] || {}) : {};
+  const isCaptchaRequired = ipInfo.captchaRequired || userInfo.captchaRequired || false;
   
   console.log(`CAPTCHA check for ${isGuestUser ? 'IP' : 'User'} ${rateLimitKey}: required=${isCaptchaRequired}`);
   
