@@ -116,6 +116,7 @@ router.post('/create-checkout', authenticateToken, async (req, res) => {
     }
     
     // Create Paddle Billing checkout session via API
+    const frontendUrl = process.env.FRONTEND_URL?.replace(/\/$/, '') || 'https://boomlify.com';
     const checkoutData = {
       items: [{
         price_id: paddleProductId,
@@ -129,8 +130,8 @@ router.post('/create-checkout', authenticateToken, async (req, res) => {
         ...(plan && { plan }),
         ...(credits && { credits })
       },
-      success_url: `${process.env.FRONTEND_URL}/billing/success?_ptxn={checkout_id}`,
-      cancel_url: `${process.env.FRONTEND_URL}/billing`,
+      success_url: `${frontendUrl}/billing/success?transaction_id={checkout.id}`,
+      cancel_url: `${frontendUrl}/billing`,
       settings: {
         display_mode: "inline",
         theme: "light",
