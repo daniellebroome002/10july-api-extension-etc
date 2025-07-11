@@ -209,6 +209,9 @@ router.get('/usage-history', authenticateToken, async (req, res) => {
     const userId = req.user.id;
     const { months = 3 } = req.query;
     
+    // Ensure months is a valid integer
+    const monthsLimit = Math.max(1, Math.min(12, parseInt(months) || 3));
+    
     const connection = await pool.getConnection();
     
     try {
@@ -229,7 +232,7 @@ router.get('/usage-history', authenticateToken, async (req, res) => {
         WHERE user_id = ?
         ORDER BY usage_year DESC, usage_month DESC
         LIMIT ?
-      `, [userId, parseInt(months)]);
+      `, [userId, monthsLimit]);
       
       // Get credit topup history
       const [topupHistory] = await connection.execute(`
