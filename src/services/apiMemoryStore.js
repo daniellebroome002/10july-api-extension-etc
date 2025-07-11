@@ -2,7 +2,9 @@
 // Similar architecture to guestSessionHandler.js but for API users
 import { v4 as uuidv4 } from 'uuid';
 import { pool } from '../db/init.js';
-import billingService from './billing.js';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const billingService = require('./billing.js');
 
 // In-memory storage for API emails (similar to guest system)
 export const apiEmailStore = new Map(); // { emailId: emailData }
