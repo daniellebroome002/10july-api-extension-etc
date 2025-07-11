@@ -39,10 +39,13 @@ function verifyPaddleSignature(body, signature, secret) {
       }
     }
     
+    // Ensure body is a string
+    const bodyStr = typeof body === 'string' ? body : JSON.stringify(body);
+    
     // Paddle uses HMAC-SHA256 for signature verification
     const expectedSignature = crypto
       .createHmac('sha256', secret)
-      .update(body)
+      .update(bodyStr)
       .digest('hex');
     
     // Compare signatures (constant-time comparison to prevent timing attacks)
