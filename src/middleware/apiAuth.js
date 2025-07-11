@@ -1,8 +1,6 @@
 // apiAuth.js - API Key Authentication Middleware
 import { pool } from '../db/init.js';
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-const billingService = require('../services/billing.js');
+import billingService from '../services/billing.js';
 
 // Smart caching for API tokens
 const tokenCache = new Map(); // { apiKey: { userInfo, expiresAt } }

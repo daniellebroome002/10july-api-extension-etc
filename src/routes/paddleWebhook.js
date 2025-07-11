@@ -1,8 +1,9 @@
-const express = require('express');
+import express from 'express';
+import crypto from 'crypto';
+import { pool } from '../db/init.js';
+import billingService from '../services/billing.js';
+
 const router = express.Router();
-const crypto = require('crypto');
-const pool = require('../db/init');
-const billingService = require('../services/billing');
 
 /**
  * Paddle Webhook Handler
@@ -403,4 +404,4 @@ router.get('/paddle/health', (req, res) => {
   });
 });
 
-module.exports = router; 
+export default router; 

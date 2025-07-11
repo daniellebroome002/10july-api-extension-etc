@@ -1,6 +1,6 @@
-const cron = require('node-cron');
-const pool = require('../db/init');
-const billingService = require('../services/billing');
+import cron from 'node-cron';
+import { pool } from '../db/init.js';
+import billingService from '../services/billing.js';
 
 /**
  * Subscription Synchronization Cron Job
@@ -316,7 +316,7 @@ function initializeSubscriptionSync() {
 }
 
 // Export functions for manual execution or testing
-module.exports = {
+export {
   initializeSubscriptionSync,
   runFullSync,
   syncSubscriptionsWithPaddle,

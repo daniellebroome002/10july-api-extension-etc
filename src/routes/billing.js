@@ -1,8 +1,9 @@
-const express = require('express');
+import express from 'express';
+import { authenticateToken } from '../middleware/auth.js';
+import billingService from '../services/billing.js';
+import { pool } from '../db/init.js';
+
 const router = express.Router();
-const { authenticateToken } = require('../middleware/auth');
-const billingService = require('../services/billing');
-const pool = require('../db/init');
 
 /**
  * Billing Routes - Paddle Integration
@@ -326,4 +327,4 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
   }
 });
 
-module.exports = router; 
+export default router; 

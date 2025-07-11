@@ -1,4 +1,4 @@
-const pool = require('../db/init');
+import { pool } from '../db/init.js';
 
 /**
  * Billing Service - Credit Management & Subscription Tracking
@@ -421,4 +421,4 @@ class BillingService {
 }
 
 // Export singleton instance
-module.exports = new BillingService(); 
+export default new BillingService(); 
