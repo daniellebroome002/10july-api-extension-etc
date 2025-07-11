@@ -5,6 +5,9 @@ import billingService from '../services/billing.js';
 
 const router = express.Router();
 
+// Configure raw body handling before any routes
+router.use('/paddle', express.raw({ type: 'application/json' }));
+
 /**
  * Paddle Webhook Handler
  * 
@@ -16,10 +19,6 @@ const router = express.Router();
 
 /**
  * Verify Paddle webhook signature
- * @param {string} body - Raw request body
- * @param {string} signature - Paddle signature header
- * @param {string} secret - Webhook secret from environment
- * @returns {boolean} Whether signature is valid
  */
 function verifyPaddleSignature(body, signature, secret) {
   if (!signature || !secret) {
@@ -28,44 +27,43 @@ function verifyPaddleSignature(body, signature, secret) {
   }
   
   try {
-    // Debug logging
-    console.log('[Paddle Webhook] Signature verification debug:');
-    console.log('- Raw signature:', signature);
+    // Parse the Paddle signature header
+    const signatureParts = {};
+    signature.split(';').forEach(part => {
+      const [key, value] = part.split('=');
+      signatureParts[key] = value;
+    });
     
-    // Paddle Billing signature format: "ts=timestamp;h1=signature"
-    // Extract the actual signature from the header
-    let actualSignature = signature;
-    if (signature.includes('h1=')) {
-      const parts = signature.split(';');
-      const h1Part = parts.find(part => part.startsWith('h1='));
-      if (h1Part) {
-        actualSignature = h1Part.substring(3); // Remove 'h1=' prefix
-      }
+    if (!signatureParts.ts || !signatureParts.h1) {
+      console.error('[Paddle Webhook] Invalid signature format');
+      return false;
     }
-    console.log('- Extracted signature:', actualSignature);
     
     // Ensure body is a string
-    const bodyStr = typeof body === 'string' ? body : JSON.stringify(body);
-    console.log('- Body type:', typeof body);
-    console.log('- Body string length:', bodyStr.length);
+    const rawBody = Buffer.isBuffer(body) ? body.toString('utf8') : body;
     
-    // Paddle uses HMAC-SHA256 for signature verification
+    // Create signature payload: timestamp:body
+    const signaturePayload = `${signatureParts.ts}:${rawBody}`;
+    
+    // Calculate HMAC signature
     const expectedSignature = crypto
       .createHmac('sha256', secret)
-      .update(bodyStr)
+      .update(signaturePayload)
       .digest('hex');
     
+    // Debug output
+    console.log('[Paddle Webhook] Verification details:');
+    console.log('- Timestamp:', signatureParts.ts);
+    console.log('- Raw body length:', rawBody.length);
+    console.log('- Payload length:', signaturePayload.length);
+    console.log('- Received signature:', signatureParts.h1);
     console.log('- Expected signature:', expectedSignature);
     
-    // Compare signatures (constant-time comparison to prevent timing attacks)
-    const isValid = crypto.timingSafeEqual(
-      Buffer.from(actualSignature, 'hex'),
+    // Compare signatures
+    return crypto.timingSafeEqual(
+      Buffer.from(signatureParts.h1, 'hex'),
       Buffer.from(expectedSignature, 'hex')
     );
-    
-    console.log('- Signature valid:', isValid);
-    return isValid;
-    
   } catch (error) {
     console.error('[Paddle Webhook] Signature verification failed:', error);
     return false;
@@ -354,14 +352,13 @@ async function handleSubscriptionRenewed(data) {
  * Main webhook endpoint
  * POST /api/webhook/paddle
  */
-router.post('/paddle', express.raw({ type: 'application/json' }), async (req, res) => {
+router.post('/paddle', async (req, res) => {
   try {
     const signature = req.headers['paddle-signature'];
     const webhookSecret = process.env.PADDLE_WEBHOOK_SECRET;
     
-    // Debug logging
     console.log('[Paddle Webhook] Received webhook:');
-    console.log('- Headers:', req.headers);
+    console.log('- Content-Type:', req.headers['content-type']);
     console.log('- Body type:', typeof req.body);
     console.log('- Is Buffer:', Buffer.isBuffer(req.body));
     
@@ -370,19 +367,17 @@ router.post('/paddle', express.raw({ type: 'application/json' }), async (req, re
       return res.status(500).json({ error: 'Webhook secret not configured' });
     }
     
-    // Convert body to string for signature verification
-    const rawBody = Buffer.isBuffer(req.body) ? req.body.toString() : JSON.stringify(req.body);
-    
     // Verify signature
-    if (!verifyPaddleSignature(rawBody, signature, webhookSecret)) {
+    if (!verifyPaddleSignature(req.body, signature, webhookSecret)) {
       console.error('[Paddle Webhook] Invalid signature');
       return res.status(401).json({ error: 'Invalid signature' });
     }
-
-    const event = JSON.parse(rawBody);
+    
+    // Parse the raw body
+    const event = JSON.parse(req.body.toString('utf8'));
     const { event_type, data } = event;
     
-    console.log(`[Paddle Webhook] Received event: ${event_type}`);
+    console.log(`[Paddle Webhook] Processing event: ${event_type}`);
     
     // Process different event types
     switch (event_type) {
@@ -395,7 +390,7 @@ router.post('/paddle', express.raw({ type: 'application/json' }), async (req, re
         break;
         
       case 'subscription.canceled':
-        await handleSubscriptionUpdated(data); // Same logic as updated
+        await handleSubscriptionUpdated(data);
         break;
         
       case 'transaction.completed':
@@ -408,20 +403,16 @@ router.post('/paddle', express.raw({ type: 'application/json' }), async (req, re
         
       case 'subscription.payment_failed':
         console.log(`[Paddle Webhook] Payment failed for subscription: ${data.id}`);
-        // Could implement retry logic or notifications here
         break;
         
       default:
         console.log(`[Paddle Webhook] Unhandled event type: ${event_type}`);
     }
     
-    // Always respond with 200 to acknowledge receipt
     res.status(200).json({ received: true });
     
   } catch (error) {
     console.error('[Paddle Webhook] Error processing webhook:', error);
-    
-    // Return 500 to signal Paddle to retry
     res.status(500).json({ 
       error: 'Internal server error',
       message: error.message 
