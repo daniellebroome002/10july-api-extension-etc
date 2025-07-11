@@ -2,6 +2,7 @@
 // Similar architecture to guestSessionHandler.js but for API users
 import { v4 as uuidv4 } from 'uuid';
 import { pool } from '../db/init.js';
+import billingService from './billing.js';
 
 // In-memory storage for API emails (similar to guest system)
 export const apiEmailStore = new Map(); // { emailId: emailData }
@@ -159,7 +160,7 @@ const scheduleEmailCleanup = (emailId, expiresAt) => {
 };
 
 /**
- * Create new API email
+ * Create new API email with credit/subscription billing
  */
 export const createApiEmail = async (
   userId,
@@ -167,10 +168,29 @@ export const createApiEmail = async (
   customDomain = null,
   userTier = 'free'
 ) => {
-  // Skip limit enforcement for privileged tiers
-  if (userTier !== 'unlimited' && userTier !== 'enterprise') {
+  // For FREE users, use the old daily limit system
+  if (userTier === 'free') {
     if (!checkDailyLimit(userId, timeTier)) {
       throw new Error(`Daily limit exceeded for ${timeTier} emails`);
+    }
+  } else {
+    // For PREMIUM users, use the new credit billing system
+    try {
+      const chargeResult = await billingService.chargeCredits(userId, timeTier);
+      console.log(`[API] Charged ${chargeResult.creditCost} credits to user ${userId} for ${timeTier} email`);
+      console.log(`[API] Remaining: ${chargeResult.remainingBalance} credits, ${chargeResult.remainingAllowance} allowance`);
+    } catch (error) {
+      if (error.message === 'INSUFFICIENT_CREDITS') {
+        // Return structured error for frontend handling
+        const creditInfo = await billingService.getUserCreditInfo(userId);
+        throw new Error('INSUFFICIENT_CREDITS', {
+          required: billingService.calculateCreditCost(timeTier),
+          available: creditInfo.creditBalance + creditInfo.monthlyUsage.allowanceRemaining,
+          creditBalance: creditInfo.creditBalance,
+          allowanceRemaining: creditInfo.monthlyUsage.allowanceRemaining
+        });
+      }
+      throw error; // Re-throw other errors
     }
   }
 
@@ -240,8 +260,10 @@ export const createApiEmail = async (
   // Add to email lookup map (for webhook handling)
   emailToApiUserMap.set(email, { userId, emailId });
   
-  // Update usage counter in memory
-  updateUsageCounter(userId, timeTier);
+  // Update usage counter in memory (only for free users, premium users tracked in billing service)
+  if (userTier === 'free') {
+    updateUsageCounter(userId, timeTier);
+  }
   
   // Schedule automatic cleanup
   scheduleEmailCleanup(emailId, expiresAt);
@@ -345,18 +367,43 @@ export const addApiEmailMessage = (emailId, messageData) => {
 };
 
 /**
- * Get usage statistics for a user
+ * Get usage statistics for a user (supports both free and premium users)
  */
-export const getUserUsageStats = (userId) => {
-  const today = new Date().toISOString().split('T')[0];
-  const key = `${userId}-${today}`;
-  const usage = usageCounters.get(key) || { '10min': 0, '1hour': 0, '1day': 0 };
-  
-  return {
-    '10min': usage['10min'] || 0,
-    '1hour': usage['1hour'] || 0,
-    '1day': usage['1day'] || 0
-  };
+export const getUserUsageStats = async (userId, userTier = 'free') => {
+  if (userTier === 'free') {
+    // Legacy daily counter system for free users
+    const today = new Date().toISOString().split('T')[0];
+    const key = `${userId}-${today}`;
+    const usage = usageCounters.get(key) || { '10min': 0, '1hour': 0, '1day': 0 };
+    
+    return {
+      type: 'daily_limits',
+      '10min': usage['10min'] || 0,
+      '1hour': usage['1hour'] || 0,
+      '1day': usage['1day'] || 0,
+      limits: FREE_LIMITS
+    };
+  } else {
+    // Credit-based system for premium users
+    try {
+      const creditInfo = await billingService.getUserCreditInfo(userId);
+      return {
+        type: 'credit_based',
+        creditBalance: creditInfo.creditBalance,
+        subscription: creditInfo.subscription,
+        monthlyUsage: creditInfo.monthlyUsage,
+        creditCosts: {
+          '10min': billingService.calculateCreditCost('10min'),
+          '1hour': billingService.calculateCreditCost('1hour'),
+          '24hour': billingService.calculateCreditCost('24hour')
+        }
+      };
+    } catch (error) {
+      console.error('Failed to get credit info for user:', userId, error);
+      // Fallback to free tier stats
+      return getUserUsageStats(userId, 'free');
+    }
+  }
 };
 
 /**

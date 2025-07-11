@@ -1,5 +1,6 @@
 // apiAuth.js - API Key Authentication Middleware
 import { pool } from '../db/init.js';
+import billingService from '../services/billing.js';
 
 // Smart caching for API tokens
 const tokenCache = new Map(); // { apiKey: { userInfo, expiresAt } }
@@ -77,6 +78,17 @@ export const authenticateApiKey = async (req, res, next) => {
       });
     }
     
+    // Get credit information for premium users
+    let creditInfo = null;
+    if (userSettings.premium_tier && userSettings.premium_tier !== 'free') {
+      try {
+        creditInfo = await billingService.getUserCreditInfo(userSettings.user_id);
+      } catch (error) {
+        console.error(`Failed to get credit info for user ${userSettings.user_id}:`, error);
+        // Continue without credit info - don't block API access
+      }
+    }
+
     // Attach user info to request object
     const userInfo = {
       id: userSettings.user_id,
@@ -84,7 +96,11 @@ export const authenticateApiKey = async (req, res, next) => {
       tier: userSettings.premium_tier || 'free', // Default to free tier
       apiKey: apiKey,
       userCreatedAt: userSettings.user_created_at,
-      settingsId: userSettings.id
+      settingsId: userSettings.id,
+      // Credit and subscription information
+      creditBalance: creditInfo?.creditBalance || 0,
+      subscription: creditInfo?.subscription || null,
+      monthlyUsage: creditInfo?.monthlyUsage || null
     };
     
     req.apiUser = userInfo;
@@ -109,20 +125,27 @@ export const authenticateApiKey = async (req, res, next) => {
 };
 
 /**
- * Optional: Rate limiting middleware for API endpoints
- * Can be used to add additional rate limiting beyond the daily limits
+ * Tier-based rate limiting constants
  */
-export const apiRateLimit = (requestsPerMinute = 60) => {
+const RATE_LIMITS = {
+  'free': 60,          // 60 requests per minute
+  'premium': 120,      // 120 requests per minute  
+  'premium_plus': 1000 // 1000 requests per minute (soft limit)
+};
+
+/**
+ * Optional: Rate limiting middleware for API endpoints
+ * Adjusts rate limits based on user tier
+ */
+export const apiRateLimit = (baseRequestsPerMinute = 60) => {
   const requestCounts = new Map();
   
   return (req, res, next) => {
     const userId = req.apiUser?.id;
     const userTier = req.apiUser?.tier || 'free';
 
-    // Unlimited or enterprise tiers bypass per-minute rate limiting
-    if (userTier === 'unlimited' || userTier === 'enterprise') {
-      return next();
-    }
+    // Get tier-specific rate limit
+    const requestsPerMinute = RATE_LIMITS[userTier] || baseRequestsPerMinute;
 
     if (!userId) {
       return next(); // Should not happen after auth
@@ -178,14 +201,74 @@ export const apiCorsHeaders = (req, res, next) => {
 };
 
 /**
- * Add rate limit headers to response
+ * Add rate limit and billing headers to response
  */
 export const addRateLimitHeaders = (req, res, next) => {
   const userId = req.apiUser?.id;
+  const userTier = req.apiUser?.tier || 'free';
+  
   if (userId) {
-    // These could be enhanced to show actual rate limit status
-    res.header('X-RateLimit-Limit', '60');
+    // Add tier-specific rate limit headers
+    const rateLimit = RATE_LIMITS[userTier] || 60;
+    res.header('X-RateLimit-Limit', rateLimit.toString());
     res.header('X-RateLimit-Window', '60');
+    
+    // Add billing information headers for premium users
+    if (userTier !== 'free') {
+      res.header('X-Credit-Balance', req.apiUser.creditBalance?.toString() || '0');
+      
+      if (req.apiUser.monthlyUsage) {
+        res.header('X-Monthly-Allowance', req.apiUser.monthlyUsage.monthlyAllowance?.toString() || '0');
+        res.header('X-Allowance-Remaining', req.apiUser.monthlyUsage.allowanceRemaining?.toString() || '0');
+      }
+    }
+    
+    // Add user tier header
+    res.header('X-User-Tier', userTier);
   }
   next();
+};
+
+/**
+ * Middleware to check if user has sufficient credits before API operations
+ * Use this before credit-consuming endpoints
+ */
+export const checkCreditsAvailable = (requiredCredits = 1) => {
+  return async (req, res, next) => {
+    const userId = req.apiUser?.id;
+    const userTier = req.apiUser?.tier || 'free';
+    
+    // Free users don't use credits - they use daily limits
+    if (userTier === 'free') {
+      return next();
+    }
+    
+    try {
+      // Check if user can afford the operation
+      const affordabilityCheck = await billingService.canAffordCredits(userId, requiredCredits);
+      
+      if (!affordabilityCheck.canAfford) {
+        return res.status(402).json({
+          error: 'Insufficient credits',
+          message: `This operation requires ${requiredCredits} credits but you only have ${affordabilityCheck.paymentBreakdown.totalAvailable} available`,
+          required: requiredCredits,
+          available: affordabilityCheck.paymentBreakdown.totalAvailable,
+          creditBalance: affordabilityCheck.creditInfo.creditBalance,
+          allowanceRemaining: affordabilityCheck.creditInfo.monthlyUsage.allowanceRemaining,
+          upgradeUrl: '/billing' // Frontend can use this to redirect to billing page
+        });
+      }
+      
+      // Store affordability info for the actual charge later
+      req.creditCheck = affordabilityCheck;
+      next();
+      
+    } catch (error) {
+      console.error('Credit check failed:', error);
+      res.status(500).json({
+        error: 'Credit check failed',
+        message: 'Unable to verify credit balance'
+      });
+    }
+  };
 }; 

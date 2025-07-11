@@ -20,6 +20,8 @@ import debugRoutes from './routes/debug.js'; // Added Debug routes
 import guestRoutes from './routes/guest.js'; // Added Guest routes
 import apiRoutes from './routes/apiRoutes.js'; // Added API routes
 import apiKeyRoutes from './routes/apiKeyRoutes.js'; // Added API key management routes
+import billingRoutes from './routes/billing.js'; // Added billing routes
+import paddleWebhookRoutes from './routes/paddleWebhook.js'; // Added Paddle webhook routes
 import { encryptResponse } from './middleware/encryption.js'; // Added encryption middleware
 import nodemailer from 'nodemailer';
 import http from 'http'; // Added for WebSocket support
@@ -27,6 +29,7 @@ import { setupWebSocketServer } from './services/gmailImapService.js'; // Added 
 import { setupActivityTracker } from './services/activityTracker.js'; // Add activity tracker
 import { syncAllDomainsToMailserver, checkMailserverHealth } from './services/domainSyncService.js'; // Add domain sync service
 import { initializeApiMemoryStore } from './services/apiMemoryStore.js'; // Add API memory store
+import { initializeSubscriptionSync } from './cron/subscriptionSync.js'; // Add subscription sync cron
 
 dotenv.config();
 
@@ -183,6 +186,8 @@ app.use('/gmail', gmailRoutes); // Add Gmail routes
 app.use('/debug', debugRoutes); // Add Debug routes
 app.use('/guest', guestRoutes); // Add Guest routes
 app.use('/api/v1', apiRoutes); // Add API routes (separate from encrypted routes)
+app.use('/api/billing', billingRoutes); // Add billing routes
+app.use('/api/webhook', paddleWebhookRoutes); // Add Paddle webhook routes
 
 // Handle preflight requests for /admin/all
 app.options('/emails/admin/all', cors());
@@ -235,6 +240,10 @@ initializeDatabase().then(async () => {
     // Initialize API memory store
     initializeApiMemoryStore();
     console.log('API memory store initialized for temp email API');
+    
+    // Initialize subscription sync cron jobs
+    initializeSubscriptionSync();
+    console.log('Subscription sync cron jobs initialized');
     
     // Check mailserver health and sync domains on startup
     console.log('\n🏥 Checking mailserver health...');
