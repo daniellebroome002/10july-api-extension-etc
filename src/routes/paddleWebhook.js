@@ -28,6 +28,10 @@ function verifyPaddleSignature(body, signature, secret) {
   }
   
   try {
+    // Debug logging
+    console.log('[Paddle Webhook] Signature verification debug:');
+    console.log('- Raw signature:', signature);
+    
     // Paddle Billing signature format: "ts=timestamp;h1=signature"
     // Extract the actual signature from the header
     let actualSignature = signature;
@@ -38,9 +42,12 @@ function verifyPaddleSignature(body, signature, secret) {
         actualSignature = h1Part.substring(3); // Remove 'h1=' prefix
       }
     }
+    console.log('- Extracted signature:', actualSignature);
     
     // Ensure body is a string
     const bodyStr = typeof body === 'string' ? body : JSON.stringify(body);
+    console.log('- Body type:', typeof body);
+    console.log('- Body string length:', bodyStr.length);
     
     // Paddle uses HMAC-SHA256 for signature verification
     const expectedSignature = crypto
@@ -48,11 +55,17 @@ function verifyPaddleSignature(body, signature, secret) {
       .update(bodyStr)
       .digest('hex');
     
+    console.log('- Expected signature:', expectedSignature);
+    
     // Compare signatures (constant-time comparison to prevent timing attacks)
-    return crypto.timingSafeEqual(
+    const isValid = crypto.timingSafeEqual(
       Buffer.from(actualSignature, 'hex'),
       Buffer.from(expectedSignature, 'hex')
     );
+    
+    console.log('- Signature valid:', isValid);
+    return isValid;
+    
   } catch (error) {
     console.error('[Paddle Webhook] Signature verification failed:', error);
     return false;
@@ -346,12 +359,18 @@ router.post('/paddle', express.raw({ type: 'application/json' }), async (req, re
     const signature = req.headers['paddle-signature'];
     const webhookSecret = process.env.PADDLE_WEBHOOK_SECRET;
     
+    // Debug logging
+    console.log('[Paddle Webhook] Received webhook:');
+    console.log('- Headers:', req.headers);
+    console.log('- Body type:', typeof req.body);
+    console.log('- Is Buffer:', Buffer.isBuffer(req.body));
+    
     if (!webhookSecret) {
       console.error('[Paddle Webhook] PADDLE_WEBHOOK_SECRET not configured');
       return res.status(500).json({ error: 'Webhook secret not configured' });
     }
     
-        // Convert body to string for signature verification
+    // Convert body to string for signature verification
     const rawBody = Buffer.isBuffer(req.body) ? req.body.toString() : JSON.stringify(req.body);
     
     // Verify signature
