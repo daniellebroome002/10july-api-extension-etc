@@ -116,12 +116,12 @@ router.post('/create-checkout', authenticateToken, async (req, res) => {
     }
     
     // Create Paddle Billing checkout session via API
-    // Paddle Billing requires creating a transaction via API first
     const checkoutData = {
       items: [{
         price_id: paddleProductId,
         quantity: 1
       }],
+      customer_id: userId, // Use customer ID if exists
       customer_email: userEmail,
       custom_data: {
         user_id: userId,
@@ -129,22 +129,20 @@ router.post('/create-checkout', authenticateToken, async (req, res) => {
         ...(plan && { plan }),
         ...(credits && { credits })
       },
-      checkout_settings: {
-        allow_logout: false,
-        display_mode: "overlay",
+      success_url: `${process.env.FRONTEND_URL}/billing/success?_ptxn={checkout_id}`,
+      cancel_url: `${process.env.FRONTEND_URL}/billing`,
+      settings: {
+        display_mode: "inline",
         theme: "light",
         locale: "en",
-        success_url: `${process.env.FRONTEND_URL}/dashboard?success=true`,
-        cancel_url: `${process.env.FRONTEND_URL}/billing`
+        custom_data: {
+          user_id: userId
+        }
       }
     };
 
-    // Create checkout session using Paddle API
-    const paddleApiUrl = process.env.PADDLE_SANDBOX === 'true'
-      ? 'https://sandbox-api.paddle.com'
-      : 'https://api.paddle.com';
-
-    const response = await fetch(`${paddleApiUrl}/transactions`, {
+    // Call Paddle API to create checkout
+    const response = await fetch('https://api.paddle.com/checkout/create', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${process.env.PADDLE_API_KEY}`,
@@ -154,23 +152,18 @@ router.post('/create-checkout', authenticateToken, async (req, res) => {
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(`Paddle API error: ${errorData.error?.detail || response.statusText}`);
+      const error = await response.json();
+      console.error('[Billing] Failed to create checkout:', error);
+      throw new Error('Failed to create checkout');
     }
 
-    const transactionData = await response.json();
-    const checkoutUrl = transactionData.data.checkout.url;
+    const checkoutResponse = await response.json();
     
-    console.log(`[Billing] Created checkout URL for user ${userId}: ${type} - ${plan || credits}`);
-    
+    // Return the checkout URL
     res.json({
       success: true,
       data: {
-        checkoutUrl,
-        type,
-        plan: plan || null,
-        credits: credits || null,
-        productId: paddleProductId
+        checkoutUrl: checkoutResponse.data.url
       }
     });
     
