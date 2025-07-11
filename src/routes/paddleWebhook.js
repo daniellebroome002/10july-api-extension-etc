@@ -5,26 +5,18 @@ import billingService from '../services/billing.js';
 
 const router = express.Router();
 
-// Ensure raw body parsing for Paddle webhooks
-const rawBodySaver = (req, res, buf, encoding) => {
+// Configure raw body parser
+const rawBodySaver = (req, res, buf) => {
   if (buf && buf.length) {
-    req.rawBody = buf.toString(encoding || 'utf8');
+    req.rawBody = buf;
   }
 };
 
-router.use('/paddle', express.raw({
+// Apply raw body parsing middleware specifically for the webhook endpoint
+router.use(express.raw({
   type: 'application/json',
   verify: rawBodySaver
 }));
-
-/**
- * Paddle Webhook Handler
- * 
- * Handles webhooks from Paddle for:
- * - Subscription lifecycle events
- * - Transaction completion (credit purchases)
- * - Payment failures and updates
- */
 
 /**
  * Verify Paddle webhook signature
@@ -32,6 +24,9 @@ router.use('/paddle', express.raw({
 function verifyPaddleSignature(rawBody, signature, secret) {
   if (!signature || !secret || !rawBody) {
     console.error('[Paddle Webhook] Missing signature, secret, or body');
+    console.error('- Signature:', signature);
+    console.error('- Secret exists:', !!secret);
+    console.error('- Raw body exists:', !!rawBody);
     return false;
   }
   
@@ -47,31 +42,24 @@ function verifyPaddleSignature(rawBody, signature, secret) {
       console.error('[Paddle Webhook] Invalid signature format');
       return false;
     }
+
+    // Create the string to verify: timestamp + ":" + raw body
+    const stringToVerify = `${signatureParts.ts}:${rawBody.toString()}`;
     
-    // Create signature payload: timestamp:body
-    const signaturePayload = `${signatureParts.ts}:${rawBody}`;
+    // Calculate HMAC
+    const hmac = crypto.createHmac('sha256', secret);
+    const calculatedSignature = hmac.update(stringToVerify).digest('hex');
     
-    // Calculate HMAC signature
-    const expectedSignature = crypto
-      .createHmac('sha256', secret)
-      .update(signaturePayload)
-      .digest('hex');
-    
-    // Debug output
     console.log('[Paddle Webhook] Verification details:');
     console.log('- Timestamp:', signatureParts.ts);
     console.log('- Raw body length:', rawBody.length);
-    console.log('- Payload length:', signaturePayload.length);
+    console.log('- String to verify length:', stringToVerify.length);
     console.log('- Received signature:', signatureParts.h1);
-    console.log('- Expected signature:', expectedSignature);
+    console.log('- Calculated signature:', calculatedSignature);
     
-    // Compare signatures
-    return crypto.timingSafeEqual(
-      Buffer.from(signatureParts.h1, 'hex'),
-      Buffer.from(expectedSignature, 'hex')
-    );
+    return signatureParts.h1 === calculatedSignature;
   } catch (error) {
-    console.error('[Paddle Webhook] Signature verification failed:', error);
+    console.error('[Paddle Webhook] Signature verification error:', error);
     return false;
   }
 }
@@ -358,71 +346,64 @@ async function handleSubscriptionRenewed(data) {
  * Main webhook endpoint
  * POST /api/webhook/paddle
  */
-router.post('/paddle', async (req, res) => {
+router.post('/', async (req, res) => {
+  console.log('[Paddle Webhook] Received webhook:');
+  console.log('- Content-Type:', req.get('content-type'));
+  console.log('- Raw body available:', !!req.rawBody);
+  console.log('- Raw body length:', req.rawBody?.length);
+  
+  const signature = req.get('paddle-signature');
+  const webhookSecret = process.env.PADDLE_WEBHOOK_SECRET;
+
+  // Verify webhook signature
+  if (!verifyPaddleSignature(req.rawBody, signature, webhookSecret)) {
+    console.error('[Paddle Webhook] Invalid signature');
+    return res.status(401).json({ error: 'Invalid signature' });
+  }
+
   try {
-    const signature = req.headers['paddle-signature'];
-    const webhookSecret = process.env.PADDLE_WEBHOOK_SECRET;
+    // Parse the raw body
+    const data = JSON.parse(req.rawBody.toString());
     
-    console.log('[Paddle Webhook] Received webhook:');
-    console.log('- Content-Type:', req.headers['content-type']);
-    console.log('- Raw body available:', !!req.rawBody);
-    console.log('- Raw body length:', req.rawBody?.length);
-    
-    if (!webhookSecret) {
-      console.error('[Paddle Webhook] PADDLE_WEBHOOK_SECRET not configured');
-      return res.status(500).json({ error: 'Webhook secret not configured' });
-    }
-    
-    // Verify signature using raw body
-    if (!verifyPaddleSignature(req.rawBody, signature, webhookSecret)) {
-      console.error('[Paddle Webhook] Invalid signature');
-      return res.status(401).json({ error: 'Invalid signature' });
-    }
-    
-    // Parse the webhook data
-    const event = JSON.parse(req.rawBody);
-    const { event_type, data } = event;
+    // Process the webhook data
+    const { event_type, data: eventData } = data;
     
     console.log(`[Paddle Webhook] Processing event: ${event_type}`);
     
     // Process different event types
     switch (event_type) {
       case 'subscription.created':
-        await handleSubscriptionCreated(data);
+        await handleSubscriptionCreated(eventData);
         break;
         
       case 'subscription.updated':
-        await handleSubscriptionUpdated(data);
+        await handleSubscriptionUpdated(eventData);
         break;
         
       case 'subscription.canceled':
-        await handleSubscriptionUpdated(data);
+        await handleSubscriptionUpdated(eventData);
         break;
         
       case 'transaction.completed':
-        await handleTransactionCompleted(data);
+        await handleTransactionCompleted(eventData);
         break;
         
       case 'subscription.payment_succeeded':
-        await handleSubscriptionRenewed(data);
+        await handleSubscriptionRenewed(eventData);
         break;
         
       case 'subscription.payment_failed':
-        console.log(`[Paddle Webhook] Payment failed for subscription: ${data.id}`);
+        console.log(`[Paddle Webhook] Payment failed for subscription: ${eventData.id}`);
         break;
         
       default:
         console.log(`[Paddle Webhook] Unhandled event type: ${event_type}`);
     }
     
-    res.status(200).json({ received: true });
-    
+    res.json({ success: true });
   } catch (error) {
     console.error('[Paddle Webhook] Error processing webhook:', error);
-    res.status(500).json({ 
-      error: 'Internal server error',
-      message: error.message 
-    });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
