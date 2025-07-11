@@ -133,7 +133,9 @@ router.post('/create-checkout', authenticateToken, async (req, res) => {
         allow_logout: false,
         display_mode: "overlay",
         theme: "light",
-        locale: "en"
+        locale: "en",
+        success_url: `${process.env.FRONTEND_URL}/dashboard?success=true`,
+        cancel_url: `${process.env.FRONTEND_URL}/billing`
       }
     };
 
