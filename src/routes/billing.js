@@ -207,7 +207,10 @@ router.post('/add-credits', authenticateToken, async (req, res) => {
 router.get('/usage-history', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    const { months = 3 } = req.query;
+    const { months = '3' } = req.query;
+    
+    // Ensure months is a valid integer between 1 and 12
+    const monthsLimit = Math.min(Math.max(parseInt(months) || 3, 1), 12);
     
     const connection = await pool.getConnection();
     
@@ -229,7 +232,7 @@ router.get('/usage-history', authenticateToken, async (req, res) => {
         WHERE user_id = ?
         ORDER BY usage_year DESC, usage_month DESC
         LIMIT ?
-      `, [userId, parseInt(months)]);
+      `, [userId, monthsLimit]);
       
       // Get credit topup history
       const [topupHistory] = await connection.execute(`
