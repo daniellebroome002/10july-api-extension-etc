@@ -73,13 +73,6 @@ router.post('/create-checkout', authenticateToken, async (req, res) => {
     }
     
     let paddleProductId;
-    let checkoutData = {
-      customer_email: userEmail,
-      custom_data: {
-        user_id: userId,
-        type: type
-      }
-    };
     
     if (type === 'subscription') {
       // Subscription checkout
@@ -98,8 +91,6 @@ router.post('/create-checkout', authenticateToken, async (req, res) => {
       if (!paddleProductId) {
         throw new Error(`Paddle plan ID not configured for ${plan}`);
       }
-      
-      checkoutData.custom_data.plan = plan;
       
     } else if (type === 'credits') {
       // Credit pack checkout
@@ -122,19 +113,51 @@ router.post('/create-checkout', authenticateToken, async (req, res) => {
       if (!paddleProductId) {
         throw new Error(`Paddle product ID not configured for ${credits} credits`);
       }
-      
-      checkoutData.custom_data.credits = credits;
     }
     
-    // Build Paddle Billing checkout URL (different hosts for sandbox vs live)
-    const PAD_HOST = process.env.PADDLE_SANDBOX === 'true'
-      ? 'https://sandbox.paddle.com'
-      : 'https://pay.paddle.com';
+    // Create Paddle Billing checkout session via API
+    // Paddle Billing requires creating a transaction via API first
+    const checkoutData = {
+      items: [{
+        price_id: paddleProductId,
+        quantity: 1
+      }],
+      customer_email: userEmail,
+      custom_data: {
+        user_id: userId,
+        type: type,
+        ...(plan && { plan }),
+        ...(credits && { credits })
+      },
+      checkout_settings: {
+        allow_logout: false,
+        display_mode: "overlay",
+        theme: "light",
+        locale: "en"
+      }
+    };
 
-    // customer_email pre-fills email, passthrough stores arbitrary JSON we can receive back in webhooks
-    const checkoutUrl = `${PAD_HOST}/checkout/${paddleProductId}` +
-      `?customer_email=${encodeURIComponent(userEmail)}` +
-      `&passthrough=${encodeURIComponent(JSON.stringify({ user_id: userId, type }))}`;
+    // Create checkout session using Paddle API
+    const paddleApiUrl = process.env.PADDLE_SANDBOX === 'true'
+      ? 'https://sandbox-api.paddle.com'
+      : 'https://api.paddle.com';
+
+    const response = await fetch(`${paddleApiUrl}/transactions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.PADDLE_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(checkoutData)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(`Paddle API error: ${errorData.error?.detail || response.statusText}`);
+    }
+
+    const transactionData = await response.json();
+    const checkoutUrl = transactionData.data.checkout.url;
     
     console.log(`[Billing] Created checkout URL for user ${userId}: ${type} - ${plan || credits}`);
     
