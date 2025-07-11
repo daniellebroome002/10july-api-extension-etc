@@ -125,9 +125,15 @@ router.post('/create-checkout', authenticateToken, async (req, res) => {
       checkoutData.custom_data.credits = credits;
     }
     
-    // In a real implementation, you would call Paddle's API here
-    // For now, we'll return a mock checkout URL
-    const checkoutUrl = `https://checkout.paddle.com/checkout?product=${paddleProductId}&email=${encodeURIComponent(userEmail)}&user_id=${userId}`;
+    // Build Paddle Billing checkout URL (different hosts for sandbox vs live)
+    const PAD_HOST = process.env.PADDLE_SANDBOX === 'true'
+      ? 'https://sandbox.paddle.com'
+      : 'https://pay.paddle.com';
+
+    // customer_email pre-fills email, passthrough stores arbitrary JSON we can receive back in webhooks
+    const checkoutUrl = `${PAD_HOST}/checkout/${paddleProductId}` +
+      `?customer_email=${encodeURIComponent(userEmail)}` +
+      `&passthrough=${encodeURIComponent(JSON.stringify({ user_id: userId, type }))}`;
     
     console.log(`[Billing] Created checkout URL for user ${userId}: ${type} - ${plan || credits}`);
     
