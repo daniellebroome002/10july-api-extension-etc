@@ -28,6 +28,17 @@ function verifyPaddleSignature(body, signature, secret) {
   }
   
   try {
+    // Paddle Billing signature format: "ts=timestamp;h1=signature"
+    // Extract the actual signature from the header
+    let actualSignature = signature;
+    if (signature.includes('h1=')) {
+      const parts = signature.split(';');
+      const h1Part = parts.find(part => part.startsWith('h1='));
+      if (h1Part) {
+        actualSignature = h1Part.substring(3); // Remove 'h1=' prefix
+      }
+    }
+    
     // Paddle uses HMAC-SHA256 for signature verification
     const expectedSignature = crypto
       .createHmac('sha256', secret)
@@ -36,7 +47,7 @@ function verifyPaddleSignature(body, signature, secret) {
     
     // Compare signatures (constant-time comparison to prevent timing attacks)
     return crypto.timingSafeEqual(
-      Buffer.from(signature, 'hex'),
+      Buffer.from(actualSignature, 'hex'),
       Buffer.from(expectedSignature, 'hex')
     );
   } catch (error) {
@@ -337,13 +348,16 @@ router.post('/paddle', express.raw({ type: 'application/json' }), async (req, re
       return res.status(500).json({ error: 'Webhook secret not configured' });
     }
     
+        // Convert body to string for signature verification
+    const rawBody = Buffer.isBuffer(req.body) ? req.body.toString() : JSON.stringify(req.body);
+    
     // Verify signature
-    if (!verifyPaddleSignature(req.body, signature, webhookSecret)) {
+    if (!verifyPaddleSignature(rawBody, signature, webhookSecret)) {
       console.error('[Paddle Webhook] Invalid signature');
       return res.status(401).json({ error: 'Invalid signature' });
     }
-    
-    const event = JSON.parse(req.body.toString());
+
+    const event = JSON.parse(rawBody);
     const { event_type, data } = event;
     
     console.log(`[Paddle Webhook] Received event: ${event_type}`);
