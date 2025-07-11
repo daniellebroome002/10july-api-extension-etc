@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { pool } from '../db/init.js';
 import billingService from '../services/billing.js';
+import paddleApi from '../services/paddleApi.js';
 
 /**
  * Subscription Synchronization Cron Job
@@ -39,20 +40,18 @@ async function syncSubscriptionsWithPaddle() {
     
     for (const subscription of subscriptions) {
       try {
-        // In a real implementation, you would call Paddle's API here:
-        // const paddleStatus = await paddleAPI.getSubscription(subscription.id);
-        
-        // For now, we'll just log that we would sync
-        console.log(`[SubscriptionSync] Would sync subscription ${subscription.id} for user ${subscription.user_id}`);
-        
-        // Example of what you might do:
-        // if (paddleStatus.status !== subscription.status) {
-        //   await connection.execute(`
-        //     UPDATE subscriptions 
-        //     SET status = ?, updated_at = NOW()
-        //     WHERE id = ?
-        //   `, [paddleStatus.status, subscription.id]);
-        // }
+        // Retrieve current status from Paddle
+        const paddleSub = await paddleApi.getSubscription(subscription.id);
+        const paddleStatus = paddleSub.status || paddleSub.data?.status;
+
+        if (paddleStatus && paddleStatus !== subscription.status) {
+          await connection.execute(`
+            UPDATE subscriptions 
+            SET status = ?, updated_at = NOW()
+            WHERE id = ?
+          `, [paddleStatus, subscription.id]);
+          console.log(`[SubscriptionSync] Updated subscription ${subscription.id}: ${subscription.status} -> ${paddleStatus}`);
+        }
         
         syncedCount++;
         
