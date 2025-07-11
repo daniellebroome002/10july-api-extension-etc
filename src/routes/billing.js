@@ -117,12 +117,19 @@ router.post('/create-checkout', authenticateToken, async (req, res) => {
     
     // Create Paddle Billing checkout session via API
     const frontendUrl = process.env.FRONTEND_URL?.replace(/\/$/, '') || 'https://boomlify.com';
+    
+    // Ensure URLs are properly formatted and encoded
+    const successUrl = new URL('/billing/success', frontendUrl);
+    successUrl.searchParams.set('transaction_id', '{checkout.id}');
+    
+    const cancelUrl = new URL('/billing', frontendUrl);
+    
     const checkoutData = {
       items: [{
         price_id: paddleProductId,
         quantity: 1
       }],
-      customer_id: userId, // Use customer ID if exists
+      customer_id: userId,
       customer_email: userEmail,
       custom_data: {
         user_id: userId,
@@ -130,8 +137,8 @@ router.post('/create-checkout', authenticateToken, async (req, res) => {
         ...(plan && { plan }),
         ...(credits && { credits })
       },
-      success_url: `${frontendUrl}/billing/success?transaction_id={checkout.id}`,
-      cancel_url: `${frontendUrl}/billing`,
+      success_url: successUrl.toString(),
+      cancel_url: cancelUrl.toString(),
       settings: {
         display_mode: "inline",
         theme: "light",
@@ -142,23 +149,13 @@ router.post('/create-checkout', authenticateToken, async (req, res) => {
       }
     };
 
-    // Call Paddle API to create checkout
-    const response = await fetch('https://api.paddle.com/checkout/create', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.PADDLE_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(checkoutData)
+    console.log('[Billing] Creating checkout with URLs:', {
+      success_url: successUrl.toString(),
+      cancel_url: cancelUrl.toString()
     });
 
-    if (!response.ok) {
-      const error = await response.json();
-      console.error('[Billing] Failed to create checkout:', error);
-      throw new Error('Failed to create checkout');
-    }
-
-    const checkoutResponse = await response.json();
+    // Call Paddle API to create checkout using the service
+    const checkoutResponse = await paddleApi.createCheckout(checkoutData);
     
     // Return the checkout URL
     res.json({
@@ -169,10 +166,11 @@ router.post('/create-checkout', authenticateToken, async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Failed to create checkout:', error);
+    console.error('[Billing] Failed to create checkout:', error.response?.data || error);
     res.status(500).json({
       success: false,
-      error: 'Failed to create checkout URL'
+      error: 'Failed to create checkout URL',
+      details: error.response?.data?.error || error.message
     });
   }
 });
