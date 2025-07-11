@@ -2,6 +2,7 @@ import express from 'express';
 import { authenticateToken } from '../middleware/auth.js';
 import billingService from '../services/billing.js';
 import { pool } from '../db/init.js';
+import paddleApi from '../services/paddleApi.js';
 
 const router = express.Router();
 
@@ -237,8 +238,8 @@ router.get('/usage-history', authenticateToken, async (req, res) => {
         FROM api_usage_monthly
         WHERE user_id = ?
         ORDER BY usage_year DESC, usage_month DESC
-        LIMIT ?
-      `, [userId, monthsLimit]);
+        LIMIT ${monthsLimit}
+      `, [userId]);
       
       // Get credit topup history
       const [topupHistory] = await connection.execute(`
@@ -304,8 +305,18 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
       
       const subscription = subscriptions[0];
       
-      // In a real implementation, you would call Paddle's API to cancel the subscription
-      // For now, we'll just mark it as canceled in our database
+      // Cancel the subscription in Paddle first
+      try {
+        await paddleApi.cancelSubscription(subscription.id);
+      } catch (apiError) {
+        console.error(`[Billing] Paddle cancel failed for subscription ${subscription.id}:`, apiError?.response?.data || apiError);
+        return res.status(502).json({
+          success: false,
+          error: 'Failed to cancel subscription with Paddle'
+        });
+      }
+
+      // Mark as canceled in our database
       await connection.execute(`
         UPDATE subscriptions 
         SET status = 'canceled', canceled_at = NOW()
