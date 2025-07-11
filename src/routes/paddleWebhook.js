@@ -5,8 +5,17 @@ import billingService from '../services/billing.js';
 
 const router = express.Router();
 
-// Configure raw body handling before any routes
-router.use('/paddle', express.raw({ type: 'application/json' }));
+// Ensure raw body parsing for Paddle webhooks
+const rawBodySaver = (req, res, buf, encoding) => {
+  if (buf && buf.length) {
+    req.rawBody = buf.toString(encoding || 'utf8');
+  }
+};
+
+router.use('/paddle', express.raw({
+  type: 'application/json',
+  verify: rawBodySaver
+}));
 
 /**
  * Paddle Webhook Handler
@@ -20,9 +29,9 @@ router.use('/paddle', express.raw({ type: 'application/json' }));
 /**
  * Verify Paddle webhook signature
  */
-function verifyPaddleSignature(body, signature, secret) {
-  if (!signature || !secret) {
-    console.error('[Paddle Webhook] Missing signature or secret');
+function verifyPaddleSignature(rawBody, signature, secret) {
+  if (!signature || !secret || !rawBody) {
+    console.error('[Paddle Webhook] Missing signature, secret, or body');
     return false;
   }
   
@@ -38,9 +47,6 @@ function verifyPaddleSignature(body, signature, secret) {
       console.error('[Paddle Webhook] Invalid signature format');
       return false;
     }
-    
-    // Ensure body is a string
-    const rawBody = Buffer.isBuffer(body) ? body.toString('utf8') : body;
     
     // Create signature payload: timestamp:body
     const signaturePayload = `${signatureParts.ts}:${rawBody}`;
@@ -359,22 +365,22 @@ router.post('/paddle', async (req, res) => {
     
     console.log('[Paddle Webhook] Received webhook:');
     console.log('- Content-Type:', req.headers['content-type']);
-    console.log('- Body type:', typeof req.body);
-    console.log('- Is Buffer:', Buffer.isBuffer(req.body));
+    console.log('- Raw body available:', !!req.rawBody);
+    console.log('- Raw body length:', req.rawBody?.length);
     
     if (!webhookSecret) {
       console.error('[Paddle Webhook] PADDLE_WEBHOOK_SECRET not configured');
       return res.status(500).json({ error: 'Webhook secret not configured' });
     }
     
-    // Verify signature
-    if (!verifyPaddleSignature(req.body, signature, webhookSecret)) {
+    // Verify signature using raw body
+    if (!verifyPaddleSignature(req.rawBody, signature, webhookSecret)) {
       console.error('[Paddle Webhook] Invalid signature');
       return res.status(401).json({ error: 'Invalid signature' });
     }
     
-    // Parse the raw body
-    const event = JSON.parse(req.body.toString('utf8'));
+    // Parse the webhook data
+    const event = JSON.parse(req.rawBody);
     const { event_type, data } = event;
     
     console.log(`[Paddle Webhook] Processing event: ${event_type}`);
