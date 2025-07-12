@@ -16,20 +16,62 @@ async function initializePaddle() {
       return;
     }
     
-    paddle = new Paddle(
-      process.env.PADDLE_API_KEY,
-      {
-        environment: process.env.PADDLE_SANDBOX === 'true' ? Environment.sandbox : Environment.production
-      }
-    );
-    console.log('Paddle client initialized successfully');
+    const environment = process.env.PADDLE_SANDBOX === 'true' ? Environment.sandbox : Environment.production;
+    
+    paddle = new Paddle(process.env.PADDLE_API_KEY, {
+      environment: environment
+    });
+    
+    console.log(`Paddle client initialized successfully in ${environment} mode`);
   } catch (error) {
     console.error('Failed to initialize Paddle client:', error);
     console.warn('Billing features will be disabled. Please check Paddle SDK installation and configuration.');
   }
 }
 
+// Validate required environment variables
+const requiredEnvVars = {
+  'PADDLE_API_KEY': 'Your Paddle API key for server-side operations',
+  'PADDLE_SANDBOX': 'Set to "true" for sandbox environment, "false" for production',
+  'FRONTEND_URL': 'Your frontend URL for return redirects',
+  'PADDLE_PREMIUM_PLAN_ID': 'Price ID for Premium plan',
+  'PADDLE_PREMIUM_PLUS_PLAN_ID': 'Price ID for Premium Plus plan',
+  'PADDLE_CREDITS_1K_PRODUCT_ID': 'Product ID for 1k credits package',
+  'PADDLE_CREDITS_5K_PRODUCT_ID': 'Product ID for 5k credits package',
+  'PADDLE_CREDITS_20K_PRODUCT_ID': 'Product ID for 20k credits package'
+};
+
+function validateEnvironmentVariables() {
+  const missing = [];
+  const warnings = [];
+  
+  for (const [key, description] of Object.entries(requiredEnvVars)) {
+    if (!process.env[key]) {
+      if (key === 'PADDLE_API_KEY') {
+        missing.push(`${key}: ${description}`);
+      } else {
+        warnings.push(`${key}: ${description}`);
+      }
+    }
+  }
+  
+  if (missing.length > 0) {
+    console.error('❌ CRITICAL: Missing required environment variables:');
+    missing.forEach(msg => console.error(`   - ${msg}`));
+    console.error('   Billing features will be completely disabled.');
+  }
+  
+  if (warnings.length > 0) {
+    console.warn('⚠️  WARNING: Missing optional environment variables:');
+    warnings.forEach(msg => console.warn(`   - ${msg}`));
+    console.warn('   Some billing features may not work correctly.');
+  }
+  
+  return missing.length === 0;
+}
+
 // Initialize Paddle on module load
+validateEnvironmentVariables();
 initializePaddle();
 
 /**
@@ -510,26 +552,26 @@ export async function createSubscriptionCheckout(userId, planId, customData = {}
     
     const user = users[0];
     
-    // Create checkout session
-    const checkoutData = {
-      items: [{ price_id: planId, quantity: 1 }],
-      customer_email: user.email,
-      custom_data: {
-        user_id: userId,
+    // Create transaction with checkout
+    const transactionData = {
+      items: [{ priceId: planId, quantity: 1 }],
+      customerEmail: user.email,
+      customData: {
+        userId: userId,
         ...customData
       },
-      return_url: `${process.env.FRONTEND_URL}/billing?success=1`,
-      billing_details: {
-        enable_checkout: true,
-        collect_addresses: true
+      returnUrl: `${process.env.FRONTEND_URL}/billing?success=1`,
+      billingDetails: {
+        enableCheckout: true,
+        collectAddresses: true
       }
     };
     
-    const checkout = await paddle.checkouts.create(checkoutData);
+    const transaction = await paddle.transactions.create(transactionData);
     
     return {
-      checkoutUrl: checkout.data.url,
-      checkoutId: checkout.data.id
+      checkout_url: transaction.data.checkout.url,
+      checkout_id: transaction.data.id
     };
   } catch (error) {
     console.error('Failed to create subscription checkout:', error);
@@ -556,27 +598,27 @@ export async function createCreditTopupCheckout(userId, productId, customData = 
     
     const user = users[0];
     
-    // Create checkout session
-    const checkoutData = {
-      items: [{ price_id: productId, quantity: 1 }],
-      customer_email: user.email,
-      custom_data: {
-        user_id: userId,
+    // Create transaction with checkout
+    const transactionData = {
+      items: [{ priceId: productId, quantity: 1 }],
+      customerEmail: user.email,
+      customData: {
+        userId: userId,
         type: 'credit_topup',
         ...customData
       },
-      return_url: `${process.env.FRONTEND_URL}/billing?topup=1`,
-      billing_details: {
-        enable_checkout: true,
-        collect_addresses: true
+      returnUrl: `${process.env.FRONTEND_URL}/billing?topup=1`,
+      billingDetails: {
+        enableCheckout: true,
+        collectAddresses: true
       }
     };
     
-    const checkout = await paddle.checkouts.create(checkoutData);
+    const transaction = await paddle.transactions.create(transactionData);
     
     return {
-      checkoutUrl: checkout.data.url,
-      checkoutId: checkout.data.id
+      checkout_url: transaction.data.checkout.url,
+      checkout_id: transaction.data.id
     };
   } catch (error) {
     console.error('Failed to create credit topup checkout:', error);
