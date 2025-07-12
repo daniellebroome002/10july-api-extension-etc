@@ -87,11 +87,11 @@ router.post('/create-checkout', authenticateToken, async (req, res) => {
       
       // Get Paddle price IDs from environment variables (these should be price IDs, not product IDs)
       priceId = plan === 'premium' 
-        ? process.env.PADDLE_PREMIUM_PRICE_ID 
-        : process.env.PADDLE_PREMIUM_PLUS_PRICE_ID;
+        ? process.env.PADDLE_PREMIUM_PLAN_ID 
+        : process.env.PADDLE_PREMIUM_PLUS_PLAN_ID;
         
       if (!priceId) {
-        throw new Error(`Paddle price ID not configured for ${plan}`);
+        throw new Error(`Paddle plan ID not configured for ${plan}`);
       }
       
     } else if (type === 'credits') {
@@ -105,15 +105,15 @@ router.post('/create-checkout', authenticateToken, async (req, res) => {
       
       // Get Paddle price IDs for credit packs
       const creditPriceMap = {
-        1000: process.env.PADDLE_CREDITS_1K_PRICE_ID,
-        5000: process.env.PADDLE_CREDITS_5K_PRICE_ID,
-        20000: process.env.PADDLE_CREDITS_20K_PRICE_ID
+        1000: process.env.PADDLE_CREDITS_1K_PRODUCT_ID,
+        5000: process.env.PADDLE_CREDITS_5K_PRODUCT_ID,
+        20000: process.env.PADDLE_CREDITS_20K_PRODUCT_ID
       };
       
       priceId = creditPriceMap[credits];
       
       if (!priceId) {
-        throw new Error(`Paddle price ID not configured for ${credits} credits`);
+        throw new Error(`Paddle product ID not configured for ${credits} credits`);
       }
     }
 
