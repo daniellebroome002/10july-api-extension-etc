@@ -1,14 +1,47 @@
 // billing.js - Credit Accounting System with In-Memory Caching
 import { pool } from '../db/init.js';
-import { Paddle, Environment } from '@paddle/paddle-node-sdk';
 
-// Initialize Paddle client
-const paddle = new Paddle(
-  process.env.PADDLE_API_KEY,
-  {
-    environment: process.env.PADDLE_SANDBOX === 'true' ? Environment.sandbox : Environment.production
+// Initialize Paddle client with error handling
+let paddle = null;
+
+/**
+ * Initialize Paddle client
+ */
+async function initializePaddle() {
+  try {
+    const { Paddle, Environment } = await import('@paddle/paddle-node-sdk');
+    
+    if (!process.env.PADDLE_API_KEY) {
+      console.warn('PADDLE_API_KEY not found in environment variables. Billing features will be disabled.');
+      return;
+    }
+    
+    paddle = new Paddle(
+      process.env.PADDLE_API_KEY,
+      {
+        environment: process.env.PADDLE_SANDBOX === 'true' ? Environment.sandbox : Environment.production
+      }
+    );
+    console.log('Paddle client initialized successfully');
+  } catch (error) {
+    console.error('Failed to initialize Paddle client:', error);
+    console.warn('Billing features will be disabled. Please check Paddle SDK installation and configuration.');
   }
-);
+}
+
+// Initialize Paddle on module load
+initializePaddle();
+
+/**
+ * Ensure Paddle is initialized
+ */
+async function ensurePaddleInitialized() {
+  if (!paddle) {
+    console.log('Paddle not initialized, attempting to initialize...');
+    await initializePaddle();
+  }
+  return paddle !== null;
+}
 
 // In-memory credit wallet cache
 const creditWalletCache = new Map(); // { userId: { balance, lastSync, dirty } }
@@ -463,6 +496,12 @@ export async function recordCreditTopup(topupData) {
  */
 export async function createSubscriptionCheckout(userId, planId, customData = {}) {
   try {
+    // Ensure Paddle is initialized
+    const isPaddleReady = await ensurePaddleInitialized();
+    if (!isPaddleReady) {
+      throw new Error('Paddle payment system is not configured. Please contact support.');
+    }
+    
     // Get user info
     const [users] = await pool.query('SELECT email FROM users WHERE id = ?', [userId]);
     if (users.length === 0) {
@@ -503,6 +542,12 @@ export async function createSubscriptionCheckout(userId, planId, customData = {}
  */
 export async function createCreditTopupCheckout(userId, productId, customData = {}) {
   try {
+    // Ensure Paddle is initialized
+    const isPaddleReady = await ensurePaddleInitialized();
+    if (!isPaddleReady) {
+      throw new Error('Paddle payment system is not configured. Please contact support.');
+    }
+    
     // Get user info
     const [users] = await pool.query('SELECT email FROM users WHERE id = ?', [userId]);
     if (users.length === 0) {
