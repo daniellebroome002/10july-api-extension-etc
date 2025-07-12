@@ -262,7 +262,7 @@ export const createApiEmail = async (
   
   // Update usage counter in memory (only for free users, premium users tracked in billing service)
   if (userTier === 'free') {
-    updateUsageCounter(userId, timeTier);
+  updateUsageCounter(userId, timeTier);
   }
   
   // Schedule automatic cleanup
@@ -372,17 +372,17 @@ export const addApiEmailMessage = (emailId, messageData) => {
 export const getUserUsageStats = async (userId, userTier = 'free') => {
   if (userTier === 'free') {
     // Legacy daily counter system for free users
-    const today = new Date().toISOString().split('T')[0];
-    const key = `${userId}-${today}`;
-    const usage = usageCounters.get(key) || { '10min': 0, '1hour': 0, '1day': 0 };
-    
-    return {
+  const today = new Date().toISOString().split('T')[0];
+  const key = `${userId}-${today}`;
+  const usage = usageCounters.get(key) || { '10min': 0, '1hour': 0, '1day': 0 };
+  
+  return {
       type: 'daily_limits',
-      '10min': usage['10min'] || 0,
-      '1hour': usage['1hour'] || 0,
+    '10min': usage['10min'] || 0,
+    '1hour': usage['1hour'] || 0,
       '1day': usage['1day'] || 0,
       limits: FREE_LIMITS
-    };
+  };
   } else {
     // Credit-based system for premium users
     try {

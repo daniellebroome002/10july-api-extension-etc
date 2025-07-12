@@ -1,73 +1,24 @@
 import express from 'express';
-import crypto from 'crypto';
 import { pool } from '../db/init.js';
 import billingService from '../services/billing.js';
+import paddleApi from '../services/paddleApi.js';
 
 const router = express.Router();
 
-// Configure raw body parser
-const rawBodySaver = (req, res, buf) => {
-  if (buf && buf.length) {
-    req.rawBody = buf;
-  }
-};
-
-// Apply raw body parsing middleware specifically for the webhook endpoint
+// Configure raw body parser for webhook signature verification
 router.use(express.raw({
   type: 'application/json',
-  verify: rawBodySaver
-}));
-
-/**
- * Verify Paddle webhook signature
- */
-function verifyPaddleSignature(rawBody, signature, secret) {
-  if (!signature || !secret || !rawBody) {
-    console.error('[Paddle Webhook] Missing signature, secret, or body');
-    console.error('- Signature:', signature);
-    console.error('- Secret exists:', !!secret);
-    console.error('- Raw body exists:', !!rawBody);
-    return false;
-  }
-  
-  try {
-    // Parse the Paddle signature header
-    const signatureParts = {};
-    signature.split(';').forEach(part => {
-      const [key, value] = part.split('=');
-      signatureParts[key] = value;
-    });
-    
-    if (!signatureParts.ts || !signatureParts.h1) {
-      console.error('[Paddle Webhook] Invalid signature format');
-      return false;
+  verify: (req, res, buf) => {
+    if (buf && buf.length) {
+      req.rawBody = buf;
     }
-
-    // Create the string to verify: timestamp + ":" + raw body
-    const stringToVerify = `${signatureParts.ts}:${rawBody.toString()}`;
-    
-    // Calculate HMAC
-    const hmac = crypto.createHmac('sha256', secret);
-    const calculatedSignature = hmac.update(stringToVerify).digest('hex');
-    
-    console.log('[Paddle Webhook] Verification details:');
-    console.log('- Timestamp:', signatureParts.ts);
-    console.log('- Raw body length:', rawBody.length);
-    console.log('- String to verify length:', stringToVerify.length);
-    console.log('- Received signature:', signatureParts.h1);
-    console.log('- Calculated signature:', calculatedSignature);
-    
-    return signatureParts.h1 === calculatedSignature;
-  } catch (error) {
-    console.error('[Paddle Webhook] Signature verification error:', error);
-    return false;
   }
-}
+}));
 
 /**
  * Process subscription created event
  */
-async function handleSubscriptionCreated(data) {
+async function handleSubscriptionCreated(eventData) {
   const connection = await pool.getConnection();
   
   try {
@@ -83,7 +34,7 @@ async function handleSubscriptionCreated(data) {
       next_billed_at,
       billing_cycle,
       items
-    } = data;
+    } = eventData;
     
     // Extract user ID from custom data
     const userId = custom_data?.user_id;
@@ -100,7 +51,7 @@ async function handleSubscriptionCreated(data) {
     }
     
     // Get the price ID from the first item
-    const paddlePlanId = items[0]?.price?.id;
+    const paddlePriceId = items[0]?.price?.id;
     
     // Insert subscription record
     await connection.execute(`
@@ -116,7 +67,7 @@ async function handleSubscriptionCreated(data) {
       paddleCustomerId,
       planType,
       status,
-      paddlePlanId,
+      paddlePriceId,
       'USD', // Default currency
       JSON.stringify(billing_cycle),
       monthlyAllowance,
@@ -149,7 +100,7 @@ async function handleSubscriptionCreated(data) {
 /**
  * Process subscription updated event
  */
-async function handleSubscriptionUpdated(data) {
+async function handleSubscriptionUpdated(eventData) {
   const connection = await pool.getConnection();
   
   try {
@@ -159,7 +110,7 @@ async function handleSubscriptionUpdated(data) {
       current_billing_period,
       next_billed_at,
       canceled_at
-    } = data;
+    } = eventData;
     
     // Update subscription status and dates
     await connection.execute(`
@@ -206,7 +157,7 @@ async function handleSubscriptionUpdated(data) {
 /**
  * Process transaction completed event (credit purchases)
  */
-async function handleTransactionCompleted(data) {
+async function handleTransactionCompleted(eventData) {
   const connection = await pool.getConnection();
   
   try {
@@ -220,7 +171,7 @@ async function handleTransactionCompleted(data) {
       items,
       details,
       billed_at
-    } = data;
+    } = eventData;
     
     // Check if this is a credit purchase
     const creditAmount = custom_data?.credits;
@@ -234,7 +185,7 @@ async function handleTransactionCompleted(data) {
     // Get transaction details
     const amountPaid = parseFloat(details.totals.total) / 100; // Convert from cents
     const currencyCode = details.totals.currency_code;
-    const productId = items[0]?.price?.product?.id;
+    const priceId = items[0]?.price?.id;
     
     // Check if we already processed this transaction
     const [existing] = await connection.execute(`
@@ -257,7 +208,7 @@ async function handleTransactionCompleted(data) {
       userId,
       transactionId,
       paddleCustomerId,
-      productId,
+      priceId,
       creditAmount,
       creditAmount, // Applied amount = purchased amount
       amountPaid,
@@ -285,7 +236,7 @@ async function handleTransactionCompleted(data) {
 /**
  * Process subscription renewal event
  */
-async function handleSubscriptionRenewed(data) {
+async function handleSubscriptionRenewed(eventData) {
   const connection = await pool.getConnection();
   
   try {
@@ -293,7 +244,7 @@ async function handleSubscriptionRenewed(data) {
       id: subscriptionId,
       current_billing_period,
       next_billed_at
-    } = data;
+    } = eventData;
     
     // Update subscription billing period
     await connection.execute(`
@@ -347,62 +298,61 @@ async function handleSubscriptionRenewed(data) {
  * POST /api/webhook/paddle
  */
 router.post('/', async (req, res) => {
-  console.log('[Paddle Webhook] Received webhook:');
-  console.log('- Content-Type:', req.get('content-type'));
-  console.log('- Raw body available:', !!req.rawBody);
-  console.log('- Raw body length:', req.rawBody?.length);
+  console.log('[Paddle Webhook] Received webhook');
   
   const signature = req.get('paddle-signature');
   const webhookSecret = process.env.PADDLE_WEBHOOK_SECRET;
+  const rawBody = req.rawBody?.toString();
 
-  // Verify webhook signature
-  if (!verifyPaddleSignature(req.rawBody, signature, webhookSecret)) {
-    console.error('[Paddle Webhook] Invalid signature');
-    return res.status(401).json({ error: 'Invalid signature' });
+  if (!signature || !webhookSecret || !rawBody) {
+    console.error('[Paddle Webhook] Missing signature, secret, or body');
+    return res.status(400).json({ error: 'Missing required webhook data' });
   }
 
   try {
-    // Parse the raw body
-    const data = JSON.parse(req.rawBody.toString());
+    // Verify webhook signature using Paddle SDK
+    const event = await paddleApi.verifyWebhook(rawBody, signature, webhookSecret);
     
-    // Process the webhook data
-    const { event_type, data: eventData } = data;
-    
-    console.log(`[Paddle Webhook] Processing event: ${event_type}`);
+    console.log(`[Paddle Webhook] Processing event: ${event.eventType}`);
     
     // Process different event types
-    switch (event_type) {
+    switch (event.eventType) {
       case 'subscription.created':
-        await handleSubscriptionCreated(eventData);
+        await handleSubscriptionCreated(event.data);
         break;
         
       case 'subscription.updated':
-        await handleSubscriptionUpdated(eventData);
+        await handleSubscriptionUpdated(event.data);
         break;
         
       case 'subscription.canceled':
-        await handleSubscriptionUpdated(eventData);
+        await handleSubscriptionUpdated(event.data);
         break;
         
       case 'transaction.completed':
-        await handleTransactionCompleted(eventData);
+        await handleTransactionCompleted(event.data);
         break;
         
       case 'subscription.payment_succeeded':
-        await handleSubscriptionRenewed(eventData);
+        await handleSubscriptionRenewed(event.data);
         break;
         
       case 'subscription.payment_failed':
-        console.log(`[Paddle Webhook] Payment failed for subscription: ${eventData.id}`);
+        console.log(`[Paddle Webhook] Payment failed for subscription: ${event.data.id}`);
         break;
         
       default:
-        console.log(`[Paddle Webhook] Unhandled event type: ${event_type}`);
+        console.log(`[Paddle Webhook] Unhandled event type: ${event.eventType}`);
     }
     
     res.json({ success: true });
   } catch (error) {
     console.error('[Paddle Webhook] Error processing webhook:', error);
+    
+    if (error.message === 'Invalid webhook signature') {
+      return res.status(401).json({ error: 'Invalid signature' });
+    }
+    
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -410,11 +360,12 @@ router.post('/', async (req, res) => {
 /**
  * Health check endpoint for webhook
  */
-router.get('/paddle/health', (req, res) => {
+router.get('/health', (req, res) => {
   res.json({ 
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    webhookSecret: !!process.env.PADDLE_WEBHOOK_SECRET
+    webhookSecret: !!process.env.PADDLE_WEBHOOK_SECRET,
+    paddleApiKey: !!process.env.PADDLE_API_KEY
   });
 });
 

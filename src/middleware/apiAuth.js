@@ -88,7 +88,7 @@ export const authenticateApiKey = async (req, res, next) => {
         // Continue without credit info - don't block API access
       }
     }
-
+    
     // Attach user info to request object
     const userInfo = {
       id: userSettings.user_id,

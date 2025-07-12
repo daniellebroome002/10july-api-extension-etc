@@ -65,6 +65,8 @@ router.post('/create-checkout', authenticateToken, async (req, res) => {
     const userId = req.user.id;
     const userEmail = req.user.email;
     
+    console.log(`[Billing] Creating checkout for user ${userId}: type=${type}, plan=${plan}, credits=${credits}`);
+    
     if (!type || !['subscription', 'credits'].includes(type)) {
       return res.status(400).json({
         success: false,
@@ -72,7 +74,7 @@ router.post('/create-checkout', authenticateToken, async (req, res) => {
       });
     }
     
-    let paddleProductId;
+    let priceId;
     
     if (type === 'subscription') {
       // Subscription checkout
@@ -83,13 +85,13 @@ router.post('/create-checkout', authenticateToken, async (req, res) => {
         });
       }
       
-      // Get Paddle plan IDs from environment variables
-      paddleProductId = plan === 'premium' 
-        ? process.env.PADDLE_PREMIUM_PLAN_ID 
-        : process.env.PADDLE_PREMIUM_PLUS_PLAN_ID;
+      // Get Paddle price IDs from environment variables (these should be price IDs, not product IDs)
+      priceId = plan === 'premium' 
+        ? process.env.PADDLE_PREMIUM_PRICE_ID 
+        : process.env.PADDLE_PREMIUM_PLUS_PRICE_ID;
         
-      if (!paddleProductId) {
-        throw new Error(`Paddle plan ID not configured for ${plan}`);
+      if (!priceId) {
+        throw new Error(`Paddle price ID not configured for ${plan}`);
       }
       
     } else if (type === 'credits') {
@@ -101,35 +103,31 @@ router.post('/create-checkout', authenticateToken, async (req, res) => {
         });
       }
       
-      // Get Paddle product IDs for credit packs
-      const creditProductMap = {
-        1000: process.env.PADDLE_CREDITS_1K_PRODUCT_ID,
-        5000: process.env.PADDLE_CREDITS_5K_PRODUCT_ID,
-        20000: process.env.PADDLE_CREDITS_20K_PRODUCT_ID
+      // Get Paddle price IDs for credit packs
+      const creditPriceMap = {
+        1000: process.env.PADDLE_CREDITS_1K_PRICE_ID,
+        5000: process.env.PADDLE_CREDITS_5K_PRICE_ID,
+        20000: process.env.PADDLE_CREDITS_20K_PRICE_ID
       };
       
-      paddleProductId = creditProductMap[credits];
+      priceId = creditPriceMap[credits];
       
-      if (!paddleProductId) {
-        throw new Error(`Paddle product ID not configured for ${credits} credits`);
+      if (!priceId) {
+        throw new Error(`Paddle price ID not configured for ${credits} credits`);
       }
     }
-    
-    // Create Paddle Billing checkout session via API
+
+    // Construct proper URLs
     const frontendUrl = process.env.FRONTEND_URL?.replace(/\/$/, '') || 'https://boomlify.com';
+    const successUrl = `${frontendUrl}/billing/success?transaction_id={transaction_id}`;
+    const cancelUrl = `${frontendUrl}/billing`;
     
-    // Ensure URLs are properly formatted and encoded
-    const successUrl = new URL('/billing/success', frontendUrl);
-    successUrl.searchParams.set('transaction_id', '{checkout.id}');
-    
-    const cancelUrl = new URL('/billing', frontendUrl);
-    
+    // Create checkout data in the correct Paddle Billing format
     const checkoutData = {
       items: [{
-        price_id: paddleProductId,
+        price_id: priceId,
         quantity: 1
       }],
-      customer_id: userId,
       customer_email: userEmail,
       custom_data: {
         user_id: userId,
@@ -137,40 +135,52 @@ router.post('/create-checkout', authenticateToken, async (req, res) => {
         ...(plan && { plan }),
         ...(credits && { credits })
       },
-      success_url: successUrl.toString(),
-      cancel_url: cancelUrl.toString(),
-      settings: {
-        display_mode: "inline",
-        theme: "light",
-        locale: "en",
-        custom_data: {
-          user_id: userId
-        }
+      checkout: {
+        url: successUrl,
+        cancel_url: cancelUrl
+      },
+      billing_details: {
+        enable_checkout: true,
+        purchase_order_number: `${userId}-${Date.now()}`,
+        additional_information: `${type} purchase for user ${userId}`
       }
     };
 
-    console.log('[Billing] Creating checkout with URLs:', {
-      success_url: successUrl.toString(),
-      cancel_url: cancelUrl.toString()
-    });
-
-    // Call Paddle API to create checkout using the service
+    console.log('[Billing] Creating checkout with data:', JSON.stringify(checkoutData, null, 2));
+    
+    // Create checkout using Paddle API
     const checkoutResponse = await paddleApi.createCheckout(checkoutData);
+    
+    console.log(`[Billing] Created checkout URL for user ${userId}: ${type} - ${plan || credits}`);
     
     // Return the checkout URL
     res.json({
       success: true,
       data: {
-        checkoutUrl: checkoutResponse.data.url
+        checkoutUrl: checkoutResponse.data.url,
+        checkoutId: checkoutResponse.data.id,
+        status: checkoutResponse.data.status
       }
     });
     
   } catch (error) {
-    console.error('[Billing] Failed to create checkout:', error.response?.data || error);
+    console.error('[Billing] Failed to create checkout:', error);
+    
+    // Extract meaningful error message
+    let errorMessage = 'Failed to create checkout URL';
+    let errorDetails = error.message;
+    
+    if (error.message.includes('Paddle API Error')) {
+      errorMessage = error.message;
+    } else if (error.message.includes('not configured')) {
+      errorMessage = 'Billing configuration error';
+      errorDetails = error.message;
+    }
+    
     res.status(500).json({
       success: false,
-      error: 'Failed to create checkout URL',
-      details: error.response?.data?.error || error.message
+      error: errorMessage,
+      details: errorDetails
     });
   }
 });
