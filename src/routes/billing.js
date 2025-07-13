@@ -57,20 +57,6 @@ router.post('/checkout/:priceId', async (req, res, next) => {
     }
     
     const email = user.email || user.user_email;
-    // Test Paddle authentication first
-    console.log('Testing Paddle authentication...');
-    try {
-      const authTest = await testPaddleAuth();
-      console.log('Paddle auth test successful:', authTest ? 'OK' : 'Failed');
-    } catch (authError) {
-      console.error('Paddle auth test failed:', authError);
-      return res.status(500).json({
-        error: 'Paddle authentication failed',
-        message: authError.message,
-        debug: process.env.NODE_ENV === 'development' ? authError.stack : undefined
-      });
-    }
-    
     console.log('Creating Paddle checkout for:', { priceId, email });
     const checkoutUrl = await createCheckoutSession(priceId, email);
     res.json({ url: checkoutUrl });
