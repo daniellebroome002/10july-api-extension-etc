@@ -64,8 +64,8 @@ export async function createCheckoutSession(priceId, email) {
   console.log('Paddle transaction response:', JSON.stringify(data, null, 2));
   
   // The checkout URL is in the response data
-  if (data && data.checkout && data.checkout.url) {
-    return data.checkout.url;
+  if (data && data.data && data.data.checkout && data.data.checkout.url) {
+    return data.data.checkout.url;
   }
   
   throw new Error('No checkout URL returned from Paddle transaction');
