@@ -11,6 +11,55 @@ function convertToMySQLDateTime(isoString) {
   return new Date(isoString).toISOString().slice(0, 19).replace('T', ' ');
 }
 
+// Helper function to link Paddle customer to existing user by email
+async function linkCustomerToUser(customerId, email) {
+  if (!customerId || !email) return null;
+  
+  try {
+    // Find existing user by email
+    const [userRows] = await pool.query('SELECT id FROM users WHERE email = ?', [email]);
+    if (userRows.length > 0) {
+      const userId = userRows[0].id;
+      
+      // Update existing subscription to link to this user
+      await pool.query(`
+        UPDATE subscriptions 
+        SET user_id = ? 
+        WHERE paddle_customer_id = ?
+      `, [userId, customerId]);
+      
+      // Update existing credit topups to link to this user
+      await pool.query(`
+        UPDATE credit_topups 
+        SET user_id = ? 
+        WHERE paddle_customer_id = ?
+      `, [userId, customerId]);
+      
+      console.log(`Linked Paddle customer ${customerId} to existing user ${userId} (${email})`);
+      return userId;
+    }
+  } catch (error) {
+    console.error('Failed to link customer to user:', error);
+  }
+  return null;
+}
+
+// Helper function to get customer email from Paddle API
+async function getCustomerEmail(customerId) {
+  if (!customerId) return null;
+  
+  try {
+    // Import paddleRequest dynamically to avoid circular imports
+    const { paddleRequest } = await import('../services/billingApi.js');
+    
+    const response = await paddleRequest('GET', `/customers/${customerId}`);
+    return response.data?.email || null;
+  } catch (error) {
+    console.error('Failed to get customer email from Paddle:', error);
+    return null;
+  }
+}
+
 const router = express.Router();
 
 // Price ID to credit mapping - using backend environment variables
@@ -181,6 +230,14 @@ async function handleSubscriptionCreated(data) {
       userId = await findUserIdByCustomerId(data.customer_id);
     }
     
+    // If still no user found, try to get customer email from Paddle API and link
+    if (!userId && data.customer_id) {
+      const customerEmail = await getCustomerEmail(data.customer_id);
+      if (customerEmail) {
+        userId = await linkCustomerToUser(data.customer_id, customerEmail);
+      }
+    }
+    
     // If still no user found, this might be a new customer
     // We'll create a temporary user record for now
     if (!userId && data.customer_id) {
@@ -346,6 +403,14 @@ async function handleSubscriptionActivated(data) {
       userId = await findUserIdByCustomerId(data.customer_id);
     }
     
+    // If still no user found, try to get customer email from Paddle API and link
+    if (!userId && data.customer_id) {
+      const customerEmail = await getCustomerEmail(data.customer_id);
+      if (customerEmail) {
+        userId = await linkCustomerToUser(data.customer_id, customerEmail);
+      }
+    }
+    
     // If still no user found, this might be a new customer
     if (!userId && data.customer_id) {
       const tempEmail = `temp_${data.customer_id}@paddle.temp`;
@@ -439,6 +504,14 @@ async function handleTransactionPaid(data) {
     let userId = null;
     if (data.customer_id) {
       userId = await findUserIdByCustomerId(data.customer_id);
+    }
+    
+    // If no user found, try to get customer email from Paddle API and link
+    if (!userId && data.customer_id) {
+      const customerEmail = await getCustomerEmail(data.customer_id);
+      if (customerEmail) {
+        userId = await linkCustomerToUser(data.customer_id, customerEmail);
+      }
     }
     
     // If no user found, this might be a new customer making a one-time purchase
