@@ -103,15 +103,18 @@ export async function paddleRequest(endpoint, data = null, method = 'POST') {
  */
 export async function createCheckoutSession(priceId, email, user = null) {
   try {
-    // Step 1: Create transaction
-    console.log('[billingApi] Step 1: Creating transaction');
+    // Step 1: Create transaction (this includes the checkout URL)
+    console.log('[billingApi] Creating transaction with checkout URL');
     const transaction = await createTransaction(priceId, email, user);
     
-    // Step 2: Create checkout session for the transaction
-    console.log('[billingApi] Step 2: Creating checkout session');
-    const checkoutUrl = await createCheckout(transaction.data.id, user);
+    // Step 2: Extract checkout URL from transaction response
+    const checkoutUrl = transaction.data.checkout?.url;
     
-    console.log(`[billingApi] ✅ Checkout created successfully: ${checkoutUrl}`);
+    if (!checkoutUrl) {
+      throw new Error('No checkout URL returned from Paddle transaction');
+    }
+    
+    console.log(`[billingApi] ✅ Checkout URL obtained: ${checkoutUrl}`);
     return checkoutUrl;
     
   } catch (error) {
@@ -155,41 +158,8 @@ async function createTransaction(priceId, email, user = null) {
   return response;
 }
 
-/**
- * Step 2: Create a checkout session for the transaction
- * @param {string} transactionId - Transaction ID from step 1
- * @param {object} [user] - User object
- * @returns {Promise<string>} - Checkout URL
- */
-async function createCheckout(transactionId, user = null) {
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-  
-  const checkoutData = {
-    transaction_id: transactionId,
-    // Success/cancel URLs
-    redirect_url: `${frontendUrl}/billing/success`,
-    cancel_url: `${frontendUrl}/billing`,
-    // Additional settings
-    settings: {
-      display_mode: 'overlay',
-      theme: 'light',
-      locale: 'en'
-    }
-  };
-
-  console.log('[billingApi] Creating checkout with data:', JSON.stringify(checkoutData, null, 2));
-  
-  const response = await paddleRequest('/checkouts', checkoutData);
-  
-  if (!response.data?.url) {
-    throw new Error('Checkout creation failed: No checkout URL returned');
-  }
-  
-  const checkoutUrl = response.data.url;
-  console.log(`[billingApi] ✅ Checkout URL generated: ${checkoutUrl}`);
-  
-  return checkoutUrl;
-}
+// Note: Paddle provides checkout URL directly in transaction response
+// No need for separate checkout creation step
 
 /**
  * Get subscription details by ID
