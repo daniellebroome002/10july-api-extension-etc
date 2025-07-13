@@ -56,6 +56,7 @@ router.post('/paddle', bodyParser.raw({ type: 'application/json' }), async (req,
         
       default:
         console.log(`Unhandled webhook event type: ${event.event_type}`);
+        console.log('Full event payload:', JSON.stringify(event, null, 2));
     }
     
     res.json({ received: true });
@@ -67,6 +68,10 @@ router.post('/paddle', bodyParser.raw({ type: 'application/json' }), async (req,
 
 async function handlePaymentSucceeded(data) {
   try {
+    if (!data.customer || !data.customer.email) {
+      console.error('Webhook payment.succeeded: Missing customer or customer.email in data:', JSON.stringify(data, null, 2));
+      return;
+    }
     const { customer, items } = data;
     
     // Find user by customer email
@@ -103,6 +108,10 @@ async function handlePaymentSucceeded(data) {
 
 async function handleSubscriptionCreated(data) {
   try {
+    if (!data.customer || !data.customer.email) {
+      console.error('Webhook subscription.created: Missing customer or customer.email in data:', JSON.stringify(data, null, 2));
+      return;
+    }
     const { customer, items } = data;
     
     // Find user by customer email
