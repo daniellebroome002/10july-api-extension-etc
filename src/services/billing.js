@@ -76,6 +76,16 @@ function addCredits(userId, amount, db = pool) {
   entry.balance += amount;
   entry.dirty = true;
   console.log(`Added ${amount} credits to user ${userId}, new balance: ${entry.balance}`);
+  
+  // Immediately persist to database so credits show up right away
+  db.query('UPDATE users SET credit_balance = credit_balance + ? WHERE id = ?', [amount, userId])
+    .catch(err => {
+      if (err.code === 'ER_BAD_FIELD_ERROR') {
+        console.warn('credit_balance column missing in users table. Consider adding via migration.');
+      } else {
+        console.error('Failed to persist credit update:', err);
+      }
+    });
 }
 
 // Initialize periodic flushing
