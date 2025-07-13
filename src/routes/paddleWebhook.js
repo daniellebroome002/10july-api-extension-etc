@@ -72,6 +72,31 @@ router.post('/paddle', bodyParser.raw({ type: 'application/json' }), async (req,
         console.log(`Transaction updated: ${event.data.id}`);
         break;
         
+      case 'transaction.created':
+        // Transaction created - initial draft state
+        console.log(`Transaction created: ${event.data.id} for customer ${event.data.customer_id}`);
+        break;
+        
+      case 'transaction.ready':
+        // Transaction ready - ready for payment
+        console.log(`Transaction ready: ${event.data.id} for customer ${event.data.customer_id}`);
+        break;
+        
+      case 'address.created':
+        // Address created - customer billing address
+        console.log(`Address created: ${event.data.id} for customer ${event.data.customer_id}`);
+        break;
+        
+      case 'payment_method.saved':
+        // Payment method saved
+        console.log(`Payment method saved: ${event.data.id} for customer ${event.data.customer_id}`);
+        break;
+        
+      case 'payment_method.deleted':
+        // Payment method deleted
+        console.log(`Payment method deleted: ${event.data.id} for customer ${event.data.customer_id}`);
+        break;
+        
       default:
         console.log(`Unhandled webhook event type: ${event.event_type}`);
         console.log('Full event payload:', JSON.stringify(event, null, 2));
@@ -153,18 +178,26 @@ async function handleSubscriptionCreated(data) {
     // If still no user found, this might be a new customer
     // We'll create a temporary user record for now
     if (!userId && data.customer_id) {
-      console.log(`Creating temporary user record for new customer: ${data.customer_id}`);
-      
-      // Create a temporary user with the customer_id as email (will be updated later)
       const tempEmail = `temp_${data.customer_id}@paddle.temp`;
-      const generatedUserId = uuidv4();
-      await pool.query(`
-        INSERT INTO users (id, email, premium_tier, created_at) 
-        VALUES (?, ?, 'free', NOW())
-      `, [generatedUserId, tempEmail]);
       
-      userId = generatedUserId;
-      console.log(`Created temporary user ${userId} for customer ${data.customer_id}`);
+      // Check if temporary user already exists
+      const [existingTempUser] = await pool.query('SELECT id FROM users WHERE email = ?', [tempEmail]);
+      if (existingTempUser.length > 0) {
+        userId = existingTempUser[0].id;
+        console.log(`Found existing temporary user ${userId} for customer ${data.customer_id}`);
+      } else {
+        console.log(`Creating temporary user record for new customer: ${data.customer_id}`);
+        
+        // Create a temporary user with the customer_id as email (will be updated later)
+        const generatedUserId = uuidv4();
+        await pool.query(`
+          INSERT INTO users (id, email, password, premium_tier, created_at) 
+          VALUES (?, ?, 'temp_paddle_user', 'free', NOW())
+        `, [generatedUserId, tempEmail]);
+        
+        userId = generatedUserId;
+        console.log(`Created temporary user ${userId} for customer ${data.customer_id}`);
+      }
     }
     
     if (!userId) {
@@ -309,18 +342,26 @@ async function handleSubscriptionActivated(data) {
     
     // If still no user found, this might be a new customer
     if (!userId && data.customer_id) {
-      console.log(`Creating temporary user record for new customer activation: ${data.customer_id}`);
-      
-      // Create a temporary user with the customer_id as email (will be updated later)
       const tempEmail = `temp_${data.customer_id}@paddle.temp`;
-      const generatedUserId = uuidv4();
-      await pool.query(`
-        INSERT INTO users (id, email, premium_tier, created_at) 
-        VALUES (?, ?, 'free', NOW())
-      `, [generatedUserId, tempEmail]);
       
-      userId = generatedUserId;
-      console.log(`Created temporary user ${userId} for customer activation ${data.customer_id}`);
+      // Check if temporary user already exists
+      const [existingTempUser] = await pool.query('SELECT id FROM users WHERE email = ?', [tempEmail]);
+      if (existingTempUser.length > 0) {
+        userId = existingTempUser[0].id;
+        console.log(`Found existing temporary user ${userId} for customer activation ${data.customer_id}`);
+      } else {
+        console.log(`Creating temporary user record for new customer activation: ${data.customer_id}`);
+        
+        // Create a temporary user with the customer_id as email (will be updated later)
+        const generatedUserId = uuidv4();
+        await pool.query(`
+          INSERT INTO users (id, email, password, premium_tier, created_at) 
+          VALUES (?, ?, 'temp_paddle_user', 'free', NOW())
+        `, [generatedUserId, tempEmail]);
+        
+        userId = generatedUserId;
+        console.log(`Created temporary user ${userId} for customer activation ${data.customer_id}`);
+      }
     }
     
     if (!userId) {
@@ -396,18 +437,26 @@ async function handleTransactionPaid(data) {
     
     // If no user found, this might be a new customer making a one-time purchase
     if (!userId && data.customer_id) {
-      console.log(`Creating temporary user record for new customer transaction: ${data.customer_id}`);
-      
-      // Create a temporary user with the customer_id as email (will be updated later)
       const tempEmail = `temp_${data.customer_id}@paddle.temp`;
-      const generatedUserId = uuidv4();
-      await pool.query(`
-        INSERT INTO users (id, email, premium_tier, created_at) 
-        VALUES (?, ?, 'free', NOW())
-      `, [generatedUserId, tempEmail]);
       
-      userId = generatedUserId;
-      console.log(`Created temporary user ${userId} for customer transaction ${data.customer_id}`);
+      // Check if temporary user already exists
+      const [existingTempUser] = await pool.query('SELECT id FROM users WHERE email = ?', [tempEmail]);
+      if (existingTempUser.length > 0) {
+        userId = existingTempUser[0].id;
+        console.log(`Found existing temporary user ${userId} for customer transaction ${data.customer_id}`);
+      } else {
+        console.log(`Creating temporary user record for new customer transaction: ${data.customer_id}`);
+        
+        // Create a temporary user with the customer_id as email (will be updated later)
+        const generatedUserId = uuidv4();
+        await pool.query(`
+          INSERT INTO users (id, email, password, premium_tier, created_at) 
+          VALUES (?, ?, 'temp_paddle_user', 'free', NOW())
+        `, [generatedUserId, tempEmail]);
+        
+        userId = generatedUserId;
+        console.log(`Created temporary user ${userId} for customer transaction ${data.customer_id}`);
+      }
     }
     
     if (!userId) {
