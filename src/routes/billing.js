@@ -75,18 +75,28 @@ router.get('/status', async (req, res) => {
     // For authenticated users, sync from DB to get latest balance
     await syncFromDB(userId, pool);
     
-    // Get fresh user data from DB
+    // Get fresh user data from DB (only query existing columns)
     const [userRows] = await pool.query(
-      'SELECT credit_balance, premium_tier, subscription_id FROM users WHERE id = ?',
+      'SELECT credit_balance, premium_tier FROM users WHERE id = ?',
       [userId]
     );
     
     const userData = userRows[0] || {};
     
+    // Check if user has an active subscription in the subscriptions table
+    const [subscriptionRows] = await pool.query(
+      'SELECT id, status, plan_type FROM subscriptions WHERE user_id = ? AND status = ?',
+      [userId, 'active']
+    );
+    
+    const activeSubscription = subscriptionRows[0] || null;
+    
     res.json({ 
       credit_balance: userData.credit_balance ?? 0, 
       plan: userData.premium_tier ?? 'free',
-      subscription_id: userData.subscription_id || null,
+      subscription_id: activeSubscription ? activeSubscription.id : null,
+      subscription_status: activeSubscription ? activeSubscription.status : null,
+      subscription_plan: activeSubscription ? activeSubscription.plan_type : null,
       user_id: userId,
       email: email
     });
