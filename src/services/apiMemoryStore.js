@@ -526,8 +526,8 @@ export const invalidateDomainsCache = () => {
 const getCreditCost = (timeTier) => {
   const costs = {
     '10min': 1,
-    '1hour': 5,
-    '1day': 10
+    '1hour': 2,
+    '1day': 3
   };
   return costs[timeTier] || 1;
 };
