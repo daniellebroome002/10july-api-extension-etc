@@ -11,7 +11,7 @@ const isSandbox = process.env.PADDLE_SANDBOX === 'true';
 
 // API Base URLs
 const API_BASE_URL = isSandbox 
-  ? 'https://api.sandbox.paddle.com'
+  ? 'https://sandbox-api.paddle.com'
   : 'https://api.paddle.com';
 
 // Checkout Base URLs  
@@ -74,6 +74,17 @@ export async function paddleRequest(endpoint, data = null, method = 'POST') {
     return responseData;
   } catch (error) {
     console.error(`[billingApi] Request failed:`, error);
+    
+    // Handle network connectivity issues
+    if (error.code === 'ENOTFOUND' || error.message.includes('fetch failed')) {
+      const environment = isSandbox ? 'sandbox' : 'production';
+      const suggestion = isSandbox 
+        ? 'Try setting PADDLE_SANDBOX=false to use production API instead'
+        : 'Check your network connectivity and DNS resolution';
+      
+      throw new Error(`Network error: Cannot reach Paddle ${environment} API (${url}). ${suggestion}. Original error: ${error.message}`);
+    }
+    
     throw error;
   }
 }
