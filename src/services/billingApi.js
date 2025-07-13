@@ -47,14 +47,22 @@ export async function paddleRequest(endpoint, data = null, method = 'POST') {
  * Create a Paddle transaction and get checkout URL
  * @param {string} priceId Paddle price ID
  * @param {string} email Customer email
+ * @param {object} user User object with additional details
  * @returns {Promise<string>} Checkout URL
  */
-export async function createCheckoutSession(priceId, email) {
+export async function createCheckoutSession(priceId, email, user = null) {
+  // Create transaction with custom data to track the user
   const requestData = {
     items: [{ 
       price_id: priceId, 
       quantity: 1 
-    }]
+    }],
+    // Add custom data to track the user
+    custom_data: {
+      user_id: user?.id || null,
+      user_email: email,
+      created_via: 'boomlify_billing'
+    }
   };
   
   console.log('Paddle transaction request data:', JSON.stringify(requestData, null, 2));
