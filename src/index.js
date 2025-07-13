@@ -54,6 +54,9 @@ app.set('trust proxy', true);
 // Create HTTP server (instead of using app.listen)
 const server = http.createServer(app);
 
+// Mount Paddle webhook route FIRST, before any body parser!
+app.use('/webhooks', paddleWebhookRouter);
+
 // Create mail transporter
 export const mailTransporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
@@ -188,7 +191,6 @@ app.use('/debug', debugRoutes); // Add Debug routes
 app.use('/guest', guestRoutes); // Add Guest routes
 app.use('/api/v1', apiRoutes); // Add API routes (separate from encrypted routes)
 app.use('/billing', authenticateAnyToken, billingRouter);
-app.use('/webhooks', paddleWebhookRouter);
 
 // Handle preflight requests for /admin/all
 app.options('/emails/admin/all', cors());
