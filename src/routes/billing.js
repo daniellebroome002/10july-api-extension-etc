@@ -25,8 +25,8 @@ router.post('/checkout/:priceId', async (req, res, next) => {
 
 // GET /billing/status -> credits + plan (stub)
 router.get('/status', async (req, res) => {
-  const user = req.user;
-  res.json({ credit_balance: user.credit_balance, plan: user.tier });
+  const user = req.user || {};
+  res.json({ credit_balance: user.credit_balance ?? 0, plan: user.tier ?? 'guest' });
 });
 
 export default router; 
