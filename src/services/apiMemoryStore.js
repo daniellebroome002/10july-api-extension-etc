@@ -2,6 +2,7 @@
 // Similar architecture to guestSessionHandler.js but for API users
 import { v4 as uuidv4 } from 'uuid';
 import { pool } from '../db/init.js';
+import { chargeCredits } from './billing.js';
 
 // In-memory storage for API emails (similar to guest system)
 export const apiEmailStore = new Map(); // { emailId: emailData }
@@ -167,6 +168,19 @@ export const createApiEmail = async (
   customDomain = null,
   userTier = 'free'
 ) => {
+  // Charge credits before creating email (for non-free tiers)
+  if (userTier !== 'free') {
+    try {
+      const creditCost = getCreditCost(timeTier);
+      chargeCredits(userId, creditCost, pool);
+    } catch (error) {
+      if (error.message === 'INSUFFICIENT_CREDITS') {
+        throw new Error('Insufficient credits to create email');
+      }
+      throw error;
+    }
+  }
+
   // Skip limit enforcement for privileged tiers
   if (userTier !== 'unlimited' && userTier !== 'enterprise') {
     if (!checkDailyLimit(userId, timeTier)) {
@@ -504,6 +518,18 @@ export const invalidateDomainsCache = () => {
   domainsCache.lastUpdate = 0;
   domainsCache.domains = [];
   console.log('Invalidated global domains cache');
+};
+
+/**
+ * Get credit cost for different time tiers
+ */
+const getCreditCost = (timeTier) => {
+  const costs = {
+    '10min': 1,
+    '1hour': 5,
+    '1day': 10
+  };
+  return costs[timeTier] || 1;
 };
 
 console.log('API Memory Store loaded with smart caching'); 

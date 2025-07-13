@@ -30,6 +30,7 @@ import { initializeApiMemoryStore } from './services/apiMemoryStore.js'; // Add 
 import billingRouter from './routes/billing.js';
 import paddleWebhookRouter from './routes/paddleWebhook.js';
 import { start as startSubscriptionSync } from './cron/subscriptionSync.js';
+import { authenticateAnyToken } from './middleware/auth.js'; // Added authentication middleware
 
 dotenv.config();
 
@@ -186,7 +187,7 @@ app.use('/gmail', gmailRoutes); // Add Gmail routes
 app.use('/debug', debugRoutes); // Add Debug routes
 app.use('/guest', guestRoutes); // Add Guest routes
 app.use('/api/v1', apiRoutes); // Add API routes (separate from encrypted routes)
-app.use('/billing', billingRouter);
+app.use('/billing', authenticateAnyToken, billingRouter);
 app.use('/webhooks', paddleWebhookRouter);
 
 // Handle preflight requests for /admin/all
