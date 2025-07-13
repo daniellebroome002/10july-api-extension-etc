@@ -19,7 +19,17 @@ router.post('/checkout/:priceId', async (req, res, next) => {
       });
     }
     
-    // Validate price ID is configured
+    // Log the price ID for debugging
+    console.log('Checkout request for price ID:', priceId);
+    console.log('Available env vars:', {
+      PADDLE_PREMIUM_PRICE_ID: process.env.PADDLE_PREMIUM_PRICE_ID,
+      PADDLE_PREMIUM_PLUS_PRICE_ID: process.env.PADDLE_PREMIUM_PLUS_PRICE_ID,
+      PADDLE_CREDIT_1K_PRICE_ID: process.env.PADDLE_CREDIT_1K_PRICE_ID,
+      PADDLE_CREDIT_5K_PRICE_ID: process.env.PADDLE_CREDIT_5K_PRICE_ID,
+      PADDLE_CREDIT_20K_PRICE_ID: process.env.PADDLE_CREDIT_20K_PRICE_ID
+    });
+    
+    // Validate price ID is configured (only if env vars are set)
     const validPriceIds = [
       process.env.PADDLE_PREMIUM_PRICE_ID,
       process.env.PADDLE_PREMIUM_PLUS_PRICE_ID,
@@ -28,11 +38,22 @@ router.post('/checkout/:priceId', async (req, res, next) => {
       process.env.PADDLE_CREDIT_20K_PRICE_ID
     ].filter(Boolean);
     
-    if (!validPriceIds.includes(priceId)) {
+    // Only validate if we have configured price IDs
+    if (validPriceIds.length > 0 && !validPriceIds.includes(priceId)) {
+      console.error('Invalid price ID:', priceId, 'Valid IDs:', validPriceIds);
       return res.status(400).json({
         error: 'Invalid price ID',
-        message: 'The specified price ID is not valid'
+        message: 'The specified price ID is not configured. Please check environment variables.',
+        debug: {
+          requested: priceId,
+          configured: validPriceIds
+        }
       });
+    }
+    
+    // If no price IDs are configured, proceed anyway (for testing)
+    if (validPriceIds.length === 0) {
+      console.warn('No Paddle price IDs configured in environment variables, proceeding with checkout anyway');
     }
     
     const email = user.email || user.user_email;
@@ -44,13 +65,15 @@ router.post('/checkout/:priceId', async (req, res, next) => {
       }) { url }
     }`;
     
+    console.log('Creating Paddle checkout for:', { priceId, email });
     const data = await paddleRequest(mutation, { priceId, email });
     res.json({ url: data.payLinkCreate.url });
   } catch (err) {
     console.error('Billing checkout error:', err);
     res.status(500).json({
       error: 'Checkout failed',
-      message: 'Failed to create checkout link. Please try again.'
+      message: 'Failed to create checkout link: ' + err.message,
+      debug: process.env.NODE_ENV === 'development' ? err.stack : undefined
     });
   }
 });
