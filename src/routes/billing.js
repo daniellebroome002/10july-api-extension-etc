@@ -57,8 +57,8 @@ router.post('/checkout/:priceId', async (req, res, next) => {
     }
     
     const email = user.email || user.user_email;
-    console.log('Creating Paddle checkout for:', { priceId, email });
-    const checkoutUrl = await createCheckoutSession(priceId, email);
+    console.log('Creating Paddle checkout for:', { priceId, email, userId: user.id });
+    const checkoutUrl = await createCheckoutSession(priceId, email, user);
     res.json({ url: checkoutUrl });
   } catch (err) {
     console.error('Billing checkout error:', err);
