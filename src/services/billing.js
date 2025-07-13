@@ -1,4 +1,4 @@
-const { paddleRequest } = require('./billingApi');
+import { paddleRequest } from './billingApi.js';
 const cache = new Map(); // userId => { balance, lastSync, dirty }
 
 const FLUSH_INTERVAL_MS = 5 * 60 * 1000;
@@ -56,9 +56,4 @@ setInterval(() => {
   }
 }, FLUSH_INTERVAL_MS);
 
-module.exports = {
-  chargeCredits,
-  addCredits,
-  syncFromDB,
-  flushDirty,
-}; 
+export { chargeCredits, addCredits, syncFromDB, flushDirty }; 

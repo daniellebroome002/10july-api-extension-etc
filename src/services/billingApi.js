@@ -1,4 +1,4 @@
-const fetch = require('node-fetch');
+// Using global fetch available in Node 18+
 
 const BASE_URL = process.env.PADDLE_SANDBOX === 'true'
   ? 'https://sandbox-api.paddle.com/graphql'

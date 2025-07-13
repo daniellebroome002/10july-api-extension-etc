@@ -1,6 +1,6 @@
-const express = require('express');
-const { paddleRequest } = require('../services/billingApi');
-const { chargeCredits } = require('../services/billing');
+import express from 'express';
+import { paddleRequest } from '../services/billingApi.js';
+import { chargeCredits } from '../services/billing.js';
 
 const router = express.Router();
 
@@ -29,4 +29,4 @@ router.get('/status', async (req, res) => {
   res.json({ credit_balance: user.credit_balance, plan: user.tier });
 });
 
-module.exports = router; 
+export default router; 

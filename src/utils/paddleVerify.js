@@ -1,4 +1,4 @@
-const crypto = require('crypto');
+import crypto from 'crypto';
 
 function verify(rawBody, signatureHeader) {
   if (!process.env.PADDLE_WEBHOOK_SECRET) {
@@ -14,4 +14,4 @@ function verify(rawBody, signatureHeader) {
   return crypto.timingSafeEqual(Buffer.from(calculated), Buffer.from(expectedSig));
 }
 
-module.exports = { verify }; 
+export { verify }; 

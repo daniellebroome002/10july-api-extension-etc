@@ -1,7 +1,7 @@
-const express = require('express');
-const bodyParser = require('body-parser');
-const { verify } = require('../utils/paddleVerify');
-const { addCredits } = require('../services/billing');
+import express from 'express';
+import bodyParser from 'body-parser';
+import { verify } from '../utils/paddleVerify.js';
+import { addCredits } from '../services/billing.js';
 
 const router = express.Router();
 
@@ -26,4 +26,4 @@ router.post('/paddle', bodyParser.raw({ type: 'application/json' }), async (req,
   }
 });
 
-module.exports = router; 
+export default router; 

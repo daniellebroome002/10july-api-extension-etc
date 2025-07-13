@@ -1,4 +1,4 @@
-const { paddleRequest } = require('../services/billingApi');
+import { paddleRequest } from '../services/billingApi.js';
 const ONE_HOUR = 60 * 60 * 1000;
 
 /**
@@ -38,4 +38,4 @@ function start(db) {
   console.log('[subscriptionSync] started');
 }
 
-module.exports = { start }; 
+export { start }; 
