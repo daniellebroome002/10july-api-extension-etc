@@ -1,5 +1,5 @@
 import express from 'express';
-import { paddleRequest } from '../services/billingApi.js';
+import { paddleRequest, createCheckoutSession, testPaddleAuth } from '../services/billingApi.js';
 import { chargeCredits, syncFromDB } from '../services/billing.js';
 import { pool } from '../db/init.js';
 
@@ -57,17 +57,23 @@ router.post('/checkout/:priceId', async (req, res, next) => {
     }
     
     const email = user.email || user.user_email;
-    const mutation = `mutation CreatePayLink($priceId: ID!, $email: String!) {
-      payLinkCreate(input: {
-        customer: { email: $email },
-        priceId: $priceId,
-        quantity: 1
-      }) { url }
-    }`;
+    // Test Paddle authentication first
+    console.log('Testing Paddle authentication...');
+    try {
+      const authTest = await testPaddleAuth();
+      console.log('Paddle auth test successful:', authTest ? 'OK' : 'Failed');
+    } catch (authError) {
+      console.error('Paddle auth test failed:', authError);
+      return res.status(500).json({
+        error: 'Paddle authentication failed',
+        message: authError.message,
+        debug: process.env.NODE_ENV === 'development' ? authError.stack : undefined
+      });
+    }
     
     console.log('Creating Paddle checkout for:', { priceId, email });
-    const data = await paddleRequest(mutation, { priceId, email });
-    res.json({ url: data.payLinkCreate.url });
+    const checkoutUrl = await createCheckoutSession(priceId, email);
+    res.json({ url: checkoutUrl });
   } catch (err) {
     console.error('Billing checkout error:', err);
     res.status(500).json({
