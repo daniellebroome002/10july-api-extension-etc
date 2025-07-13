@@ -66,32 +66,34 @@ router.post('/paddle', bodyParser.raw({ type: 'application/json' }), async (req,
   }
 });
 
+// Helper to find user by Paddle customer_id
+async function findUserIdByCustomerId(customerId) {
+  if (!customerId) return null;
+  const [rows] = await pool.query('SELECT id FROM users WHERE paddle_customer_id = ?', [customerId]);
+  if (rows.length > 0) return rows[0].id;
+  return null;
+}
+
 async function handlePaymentSucceeded(data) {
   try {
-    if (!data.customer || !data.customer.email) {
-      console.error('Webhook payment.succeeded: Missing customer or customer.email in data:', JSON.stringify(data, null, 2));
+    let userId = null;
+    let email = null;
+    if (data.customer && data.customer.email) {
+      email = data.customer.email;
+      const [userRows] = await pool.query('SELECT id FROM users WHERE email = ?', [email]);
+      if (userRows.length > 0) userId = userRows[0].id;
+    }
+    if (!userId && data.customer_id) {
+      userId = await findUserIdByCustomerId(data.customer_id);
+    }
+    if (!userId) {
+      console.error('User not found for payment. Data:', JSON.stringify(data, null, 2));
       return;
     }
-    const { customer, items } = data;
-    
-    // Find user by customer email
-    const [userRows] = await pool.query(
-      'SELECT id FROM users WHERE email = ?',
-      [customer.email]
-    );
-    
-    if (userRows.length === 0) {
-      console.error('User not found for payment:', customer.email);
-      return;
-    }
-    
-    const userId = userRows[0].id;
-    
     // Process each item in the payment
-    for (const item of items) {
-      const priceId = item.price.id;
+    for (const item of data.items || []) {
+      const priceId = item.price?.id || item.price_id;
       const quantity = item.quantity || 1;
-      
       const creditsPerItem = PRICE_TO_CREDITS[priceId];
       if (creditsPerItem) {
         const totalCredits = creditsPerItem * quantity;
@@ -108,37 +110,27 @@ async function handlePaymentSucceeded(data) {
 
 async function handleSubscriptionCreated(data) {
   try {
-    if (!data.customer || !data.customer.email) {
-      console.error('Webhook subscription.created: Missing customer or customer.email in data:', JSON.stringify(data, null, 2));
+    let userId = null;
+    let email = null;
+    if (data.customer && data.customer.email) {
+      email = data.customer.email;
+      const [userRows] = await pool.query('SELECT id FROM users WHERE email = ?', [email]);
+      if (userRows.length > 0) userId = userRows[0].id;
+    }
+    if (!userId && data.customer_id) {
+      userId = await findUserIdByCustomerId(data.customer_id);
+    }
+    if (!userId) {
+      console.error('User not found for subscription. Data:', JSON.stringify(data, null, 2));
       return;
     }
-    const { customer, items } = data;
-    
-    // Find user by customer email
-    const [userRows] = await pool.query(
-      'SELECT id FROM users WHERE email = ?',
-      [customer.email]
-    );
-    
-    if (userRows.length === 0) {
-      console.error('User not found for subscription:', customer.email);
-      return;
-    }
-    
-    const userId = userRows[0].id;
-    
     // Process subscription items
-    for (const item of items) {
-      const priceId = item.price.id;
+    for (const item of data.items || []) {
+      const priceId = item.price?.id || item.price_id;
       const tier = PRICE_TO_TIER[priceId];
-      
       if (tier) {
         // Update user's premium tier
-        await pool.query(
-          'UPDATE users SET premium_tier = ? WHERE id = ?',
-          [tier, userId]
-        );
-        
+        await pool.query('UPDATE users SET premium_tier = ? WHERE id = ?', [tier, userId]);
         // Insert subscription record in subscriptions table
         await pool.query(`
           INSERT INTO subscriptions (
@@ -155,7 +147,7 @@ async function handleSubscriptionCreated(data) {
         `, [
           data.id,
           userId,
-          customer.id,
+          data.customer_id || null,
           tier,
           data.status || 'active',
           priceId,
@@ -164,18 +156,16 @@ async function handleSubscriptionCreated(data) {
           PRICE_TO_CREDITS[priceId] || 0,
           1, // credits reset on 1st of month
           data.started_at || new Date().toISOString(),
-          data.current_period_start || new Date().toISOString(),
-          data.current_period_end || new Date(Date.now() + 30*24*60*60*1000).toISOString(),
+          data.current_billing_period?.starts_at || new Date().toISOString(),
+          data.current_billing_period?.ends_at || new Date(Date.now() + 30*24*60*60*1000).toISOString(),
           data.next_billed_at || null
         ]);
-        
         // Add initial monthly credits
         const monthlyCredits = PRICE_TO_CREDITS[priceId];
         if (monthlyCredits) {
           addCredits(userId, monthlyCredits);
           console.log(`Added ${monthlyCredits} monthly credits to user ${userId} for new subscription`);
         }
-        
         console.log(`Created subscription ${data.id} for user ${userId} with tier ${tier}`);
       }
     }
