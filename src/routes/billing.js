@@ -27,7 +27,9 @@ router.get('/info', (req, res) => {
     ...envInfo,
     priceIds: configuredPrices,
     priceCount: Object.keys(configuredPrices).length,
-    frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173'
+    frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
+    clientToken: process.env.PADDLE_CLIENT_TOKEN || null,
+    vendorId: process.env.PADDLE_VENDOR_ID || null
   });
 });
 
@@ -49,7 +51,6 @@ router.post('/checkout/:priceId', async (req, res) => {
     const envInfo = getEnvironmentInfo();
     console.log(`[billing] Checkout request - Environment: ${envInfo.environment}`);
     console.log(`[billing] API URL: ${envInfo.apiUrl}`);
-    console.log(`[billing] Checkout URL: ${envInfo.checkoutUrl}`);
     
     // Log the price ID request
     console.log(`[billing] Checkout request for price ID: ${priceId}`);
