@@ -5,6 +5,12 @@ import { addCredits } from '../services/billing.js';
 import { pool } from '../db/init.js';
 import { v4 as uuidv4 } from 'uuid';
 
+// Helper function to convert ISO datetime to MySQL format
+function convertToMySQLDateTime(isoString) {
+  if (!isoString) return null;
+  return new Date(isoString).toISOString().slice(0, 19).replace('T', ' ');
+}
+
 const router = express.Router();
 
 // Price ID to credit mapping - using backend environment variables
@@ -235,10 +241,10 @@ async function handleSubscriptionCreated(data) {
           JSON.stringify(data.billing_cycle || { frequency: 'monthly', interval: 1 }),
           PRICE_TO_CREDITS[priceId] || 0,
           1, // credits reset on 1st of month
-          data.started_at || new Date().toISOString(),
-          data.current_billing_period?.starts_at || new Date().toISOString(),
-          data.current_billing_period?.ends_at || new Date(Date.now() + 30*24*60*60*1000).toISOString(),
-          data.next_billed_at || null
+          convertToMySQLDateTime(data.started_at) || convertToMySQLDateTime(new Date().toISOString()),
+          convertToMySQLDateTime(data.current_billing_period?.starts_at) || convertToMySQLDateTime(new Date().toISOString()),
+          convertToMySQLDateTime(data.current_billing_period?.ends_at) || convertToMySQLDateTime(new Date(Date.now() + 30*24*60*60*1000).toISOString()),
+          convertToMySQLDateTime(data.next_billed_at)
         ]);
         // Add initial monthly credits
         const monthlyCredits = PRICE_TO_CREDITS[priceId];
@@ -264,9 +270,9 @@ async function handleSubscriptionUpdated(data) {
       WHERE id = ?
     `, [
       data.status,
-      data.current_period_start || null,
-      data.current_period_end || null,
-      data.next_billed_at || null,
+      convertToMySQLDateTime(data.current_period_start),
+      convertToMySQLDateTime(data.current_period_end),
+      convertToMySQLDateTime(data.next_billed_at),
       data.id
     ]);
     
@@ -404,10 +410,10 @@ async function handleSubscriptionActivated(data) {
           JSON.stringify(data.billing_cycle || { frequency: 'monthly', interval: 1 }),
           PRICE_TO_CREDITS[priceId] || 0,
           1, // credits reset on 1st of month
-          data.started_at || new Date().toISOString(),
-          data.current_billing_period?.starts_at || new Date().toISOString(),
-          data.current_billing_period?.ends_at || new Date(Date.now() + 30*24*60*60*1000).toISOString(),
-          data.next_billed_at || null
+          convertToMySQLDateTime(data.started_at) || convertToMySQLDateTime(new Date().toISOString()),
+          convertToMySQLDateTime(data.current_billing_period?.starts_at) || convertToMySQLDateTime(new Date().toISOString()),
+          convertToMySQLDateTime(data.current_billing_period?.ends_at) || convertToMySQLDateTime(new Date(Date.now() + 30*24*60*60*1000).toISOString()),
+          convertToMySQLDateTime(data.next_billed_at)
         ]);
         
         // Add monthly credits for activated subscription
@@ -491,7 +497,7 @@ async function handleTransactionPaid(data) {
             totalCredits,
             data.details?.totals?.total || 0,
             data.currency_code || 'USD',
-            data.created_at || new Date().toISOString()
+            convertToMySQLDateTime(data.created_at) || convertToMySQLDateTime(new Date().toISOString())
           ]);
           
           // Add credits to user balance
