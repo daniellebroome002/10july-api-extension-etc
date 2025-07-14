@@ -18,15 +18,17 @@ const pool = mysql.createPool({
   enableKeepAlive: true,
   keepAliveInitialDelay: 10000,
   connectTimeout: 10000, // Connection timeout in milliseconds
-  ssl: {
-    // For DigitalOcean Managed MySQL
-    rejectUnauthorized: false, // Required for DigitalOcean's self-signed certificates
-    // Fix TLS issues by specifying min and max versions
-    minVersion: 'TLSv1.2',
-    maxVersion: 'TLSv1.3',
-    // Explicitly specify ciphers to avoid decode error
-    ciphers: 'TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384'
-  }
+  ssl: process.env.DB_SSL_CA 
+    ? {
+        // Use the CA certificate from environment variables for enhanced security
+        ca: process.env.DB_SSL_CA.replace(/\\n/g, '\n'),
+        rejectUnauthorized: true 
+      }
+    : {
+        // Fallback to less secure mode if CA is not provided
+        // This is not recommended for production but maintains previous behavior
+        rejectUnauthorized: false
+      }
 });
 
 // Connection monitoring and error handling
