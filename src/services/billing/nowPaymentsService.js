@@ -52,6 +52,11 @@ class NOWPaymentsService {
     console.log('NOWPayments API Request:', {
       method: config.method?.toUpperCase(),
       url: config.url,
+      headers: {
+        'x-api-key': config.headers['x-api-key'] ? '***' + config.headers['x-api-key'].slice(-4) : 'NOT SET',
+        'Content-Type': config.headers['Content-Type'],
+        'Authorization': config.headers['Authorization'] ? 'Bearer ***' : undefined
+      },
       data: config.data ? JSON.stringify(config.data) : undefined
     });
     return config;
@@ -109,20 +114,14 @@ class NOWPaymentsService {
    */
   async createSubscription(userId, planId, customerEmail) {
     try {
-      // Try using API key as Bearer token (some APIs accept same credential in different formats)
-      const response = await axios.post(`${this.apiUrl}/subscriptions`, {
+      // Try using x-api-key authentication (via this.api) for subscriptions
+      const response = await this.api.post('/subscriptions', {
         plan_id: planId,
         customer_email: customerEmail,
         ipn_callback_url: `${this.backendUrl}/webhooks/nowpayments`,
         success_url: `${this.frontendUrl}/billing?success=1`,
         cancel_url: `${this.frontendUrl}/billing?cancelled=1`,
         order_id: `sub_${userId}_${Date.now()}` // Unique order ID
-      }, {
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 30000
       });
       
       console.log('Subscription created successfully:', {
@@ -151,13 +150,7 @@ class NOWPaymentsService {
    */
   async getSubscription(subscriptionId) {
     try {
-      const response = await axios.get(`${this.apiUrl}/subscriptions/${subscriptionId}`, {
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 30000
-      });
+      const response = await this.api.get(`/subscriptions/${subscriptionId}`);
       return response.data;
     } catch (error) {
       throw new Error(`Failed to get subscription: ${error.response?.data?.message || error.message}`);
@@ -171,13 +164,7 @@ class NOWPaymentsService {
    */
   async cancelSubscription(subscriptionId) {
     try {
-      const response = await axios.delete(`${this.apiUrl}/subscriptions/${subscriptionId}`, {
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 30000
-      });
+      const response = await this.api.delete(`/subscriptions/${subscriptionId}`);
       return response.data;
     } catch (error) {
       throw new Error(`Failed to cancel subscription: ${error.response?.data?.message || error.message}`);
