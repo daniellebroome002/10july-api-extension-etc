@@ -263,46 +263,32 @@ class UsageTracker {
         
         await connection.execute(`
           INSERT INTO api_usage_daily (
-            user_id, date, emails_10min, emails_1hour, emails_1day, 
-            total_emails, total_credit_cost, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+            user_id, date, tier_10min, tier_1hour, tier_1day, updated_at
+          ) VALUES (?, ?, ?, ?, ?, NOW())
           ON DUPLICATE KEY UPDATE
-            emails_10min = emails_10min + VALUES(emails_10min),
-            emails_1hour = emails_1hour + VALUES(emails_1hour),
-            emails_1day = emails_1day + VALUES(emails_1day),
-            total_emails = total_emails + VALUES(total_emails),
-            total_credit_cost = total_credit_cost + VALUES(total_credit_cost),
+            tier_10min = tier_10min + VALUES(tier_10min),
+            tier_1hour = tier_1hour + VALUES(tier_1hour),
+            tier_1day = tier_1day + VALUES(tier_1day),
             updated_at = NOW()
         `, [
           userId,
           date,
           usage['10min'] || 0,
           usage['1hour'] || 0,
-          usage['1day'] || 0,
-          (usage['10min'] || 0) + (usage['1hour'] || 0) + (usage['1day'] || 0),
-          usage.creditCost || 0
+          usage['1day'] || 0
         ]);
       }
       
       await connection.commit();
       
-      // Clear synced data (keep today's data)
-      const today = new Date().toISOString().split('T')[0];
-      const keysToRemove = [];
-      
-      for (const key of this.usageCounters.keys()) {
-        const [, date] = key.split('-');
-        if (date !== today) {
-          keysToRemove.push(key);
-        }
-      }
-      
-      keysToRemove.forEach(key => this.usageCounters.delete(key));
+      // Clear synced data
+      this.usageCounters.clear();
       
       console.log(`Synced ${usageData.length} usage records to database`);
     } catch (error) {
       await connection.rollback();
-      console.error('Error syncing usage to database:', error);
+      console.error('Failed to sync usage data:', error);
+      throw error;
     } finally {
       connection.release();
     }
@@ -321,36 +307,46 @@ class UsageTracker {
       const [rows] = await pool.execute(`
         SELECT 
           date,
-          emails_10min,
-          emails_1hour,
-          emails_1day,
-          total_emails,
-          total_credit_cost
+          tier_10min,
+          tier_1hour,
+          tier_1day,
+          (tier_10min + tier_1hour + tier_1day) as total_emails,
+          (tier_10min * 1 + tier_1hour * 5 + tier_1day * 25) as total_credit_cost
         FROM api_usage_daily 
         WHERE user_id = ? AND date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
         ORDER BY date DESC
       `, [userId, days]);
       
       const analytics = {
-        dailyUsage: rows,
+        dailyUsage: rows.map(row => ({
+          date: row.date,
+          emails_10min: row.tier_10min,
+          emails_1hour: row.tier_1hour,
+          emails_1day: row.tier_1day,
+          total_emails: row.total_emails,
+          total_credit_cost: row.total_credit_cost
+        })),
         totals: {
           emails: rows.reduce((sum, row) => sum + (row.total_emails || 0), 0),
           credits: rows.reduce((sum, row) => sum + (row.total_credit_cost || 0), 0)
         },
         averages: {
-          emailsPerDay: rows.length > 0 ? rows.reduce((sum, row) => sum + (row.total_emails || 0), 0) / rows.length : 0,
-          creditsPerDay: rows.length > 0 ? rows.reduce((sum, row) => sum + (row.total_credit_cost || 0), 0) / rows.length : 0
+          emailsPerDay: rows.length > 0 ? 
+            rows.reduce((sum, row) => sum + (row.total_emails || 0), 0) / Math.max(days, 1) : 0,
+          creditsPerDay: rows.length > 0 ? 
+            rows.reduce((sum, row) => sum + (row.total_credit_cost || 0), 0) / Math.max(days, 1) : 0
+        },
+        breakdown: {
+          '10min': rows.reduce((sum, row) => sum + (row.tier_10min || 0), 0),
+          '1hour': rows.reduce((sum, row) => sum + (row.tier_1hour || 0), 0),
+          '1day': rows.reduce((sum, row) => sum + (row.tier_1day || 0), 0)
         }
       };
       
       return analytics;
     } catch (error) {
       console.error('Error getting usage analytics:', error);
-      return {
-        dailyUsage: [],
-        totals: { emails: 0, credits: 0 },
-        averages: { emailsPerDay: 0, creditsPerDay: 0 }
-      };
+      throw error;
     }
   }
   
