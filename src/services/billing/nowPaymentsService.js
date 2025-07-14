@@ -39,8 +39,9 @@ class NOWPaymentsService {
     
     if (!this.bearerToken) {
       console.warn(
-        '🚨 NOWPAYMENTS_BEARER_TOKEN is NOT set. ' +
-        'Subscription API calls will fail with a 401 Unauthorized error.'
+        '⚠️ NOWPAYMENTS_BEARER_TOKEN is NOT set. ' +
+        'Will try using API key as Bearer token for subscription calls. ' +
+        'If you experience 401 errors, set NOWPAYMENTS_BEARER_TOKEN in your environment.'
       );
     }
     
@@ -110,6 +111,16 @@ class NOWPaymentsService {
    */
   async createSubscriptionPlan(planData) {
     try {
+      // Build headers for subscription plan creation
+      const requestConfig = {};
+      // Try using API key as Bearer token if no separate bearer token is provided
+      const tokenToUse = this.bearerToken || this.apiKey;
+      if (tokenToUse) {
+        requestConfig.headers = {
+          Authorization: `Bearer ${tokenToUse}`
+        };
+      }
+      
       const response = await this.api.post('/subscriptions/plans', {
         title: planData.title,
         amount: planData.amount,
@@ -117,7 +128,7 @@ class NOWPaymentsService {
         interval_day: planData.interval_day || 30,
         trial_period_day: planData.trial_period_day || 0,
         is_active: true
-      });
+      }, requestConfig);
       
       return response.data;
     } catch (error) {
@@ -136,9 +147,11 @@ class NOWPaymentsService {
     try {
       // Build headers properly - don't overwrite the default headers!
       const requestConfig = {};
-      if (this.bearerToken) {
+      // Try using API key as Bearer token if no separate bearer token is provided
+      const tokenToUse = this.bearerToken || this.apiKey;
+      if (tokenToUse) {
         requestConfig.headers = {
-          Authorization: `Bearer ${this.bearerToken}`
+          Authorization: `Bearer ${tokenToUse}`
         };
       }
       
@@ -161,11 +174,12 @@ class NOWPaymentsService {
     } catch (error) {
       const errorMessage = error.response?.data?.message || error.message;
       
-      // Provide a more helpful error if the token is missing
-      if (error.response?.status === 401 && !this.bearerToken) {
+      // Provide a more helpful error for authentication issues
+      if (error.response?.status === 401) {
         throw new Error(
           'Failed to create subscription: NOWPayments returned 401 Unauthorized. ' +
-          'This is likely because the NOWPAYMENTS_BEARER_TOKEN environment variable is missing or invalid.'
+          `Tried using ${this.bearerToken ? 'NOWPAYMENTS_BEARER_TOKEN' : 'API key as Bearer token'}. ` +
+          'Check your NOWPayments credentials or try setting NOWPAYMENTS_BEARER_TOKEN if you have a separate JWT token.'
         );
       }
       
@@ -188,8 +202,10 @@ class NOWPaymentsService {
   async getSubscription(subscriptionId) {
     try {
       const headers = {};
-      if (this.bearerToken) {
-        headers.Authorization = `Bearer ${this.bearerToken}`;
+      // Try using API key as Bearer token if no separate bearer token is provided
+      const tokenToUse = this.bearerToken || this.apiKey;
+      if (tokenToUse) {
+        headers.Authorization = `Bearer ${tokenToUse}`;
       }
       const response = await this.api.get(`/subscriptions/${subscriptionId}`, { headers });
       return response.data;
@@ -206,8 +222,10 @@ class NOWPaymentsService {
   async cancelSubscription(subscriptionId) {
     try {
       const headers = {};
-      if (this.bearerToken) {
-        headers.Authorization = `Bearer ${this.bearerToken}`;
+      // Try using API key as Bearer token if no separate bearer token is provided
+      const tokenToUse = this.bearerToken || this.apiKey;
+      if (tokenToUse) {
+        headers.Authorization = `Bearer ${tokenToUse}`;
       }
       const response = await this.api.delete(`/subscriptions/${subscriptionId}`, { headers });
       return response.data;
