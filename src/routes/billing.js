@@ -313,7 +313,7 @@ router.get('/history', authenticateToken, async (req, res) => {
       offset = 0;
     }
     
-    // Get credit purchases
+    // Get credit purchases - using string interpolation for LIMIT/OFFSET to avoid SQL parameter issues
     const [creditPurchases] = await pool.execute(`
       SELECT 
         id,
@@ -325,8 +325,8 @@ router.get('/history', authenticateToken, async (req, res) => {
       FROM credit_purchases 
       WHERE user_id = ?
       ORDER BY created_at DESC
-      LIMIT ? OFFSET ?
-    `, [userId, limit, offset]);
+      LIMIT ${limit} OFFSET ${offset}
+    `, [userId]);
     
     // Get subscription history
     const [subscriptions] = await pool.execute(`
@@ -341,8 +341,8 @@ router.get('/history', authenticateToken, async (req, res) => {
       FROM nowpayments_subscriptions 
       WHERE user_id = ?
       ORDER BY created_at DESC
-      LIMIT ? OFFSET ?
-    `, [userId, limit, offset]);
+      LIMIT ${limit} OFFSET ${offset}
+    `, [userId]);
     
     res.json({
       success: true,
