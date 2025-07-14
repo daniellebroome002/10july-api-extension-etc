@@ -278,11 +278,11 @@ router.get('/status', authenticateToken, async (req, res) => {
 router.get('/plans', authenticateToken, async (req, res) => {
   try {
     // Get plans from the service (local definitions, no API call needed)
-    const plans = nowPaymentsService.getAvailablePlans();
+    const subscriptionPlans = nowPaymentsService.getAvailablePlans();
     
     res.json({
       success: true,
-      plans: plans.map(plan => ({
+      subscriptions: subscriptionPlans.map(plan => ({
         id: plan.id,
         name: plan.name,
         amount: plan.amount,
@@ -290,7 +290,8 @@ router.get('/plans', authenticateToken, async (req, res) => {
         credits: plan.credits,
         description: plan.description,
         interval: plan.interval
-      }))
+      })),
+      creditPacks: CREDIT_PACKS
     });
   } catch (error) {
     console.error('Error fetching plans:', error);
