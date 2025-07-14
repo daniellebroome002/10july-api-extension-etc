@@ -25,12 +25,16 @@ class NOWPaymentsService {
     // Enhanced debugging for environment variables
     console.log('NOWPayments Service initialized:', {
       hasApiKey: !!this.apiKey,
+      apiKeyLength: this.apiKey?.length,
+      apiKeyEnd: this.apiKey?.slice(-4),
       hasIpnSecret: !!this.ipnSecret,
       sandbox: this.sandbox,
       backendUrl: this.backendUrl,
       frontendUrl: this.frontendUrl,
       apiUrl: this.apiUrl,
-      hasBearerToken: !!this.bearerToken
+      hasBearerToken: !!this.bearerToken,
+      bearerTokenLength: this.bearerToken?.length,
+      bearerTokenEnd: this.bearerToken?.slice(-4)
     });
     
     if (!this.bearerToken) {
@@ -130,9 +134,12 @@ class NOWPaymentsService {
    */
   async createSubscription(userId, planId, customerEmail) {
     try {
-      const headers = {};
+      // Build headers properly - don't overwrite the default headers!
+      const requestConfig = {};
       if (this.bearerToken) {
-        headers.Authorization = `Bearer ${this.bearerToken}`;
+        requestConfig.headers = {
+          Authorization: `Bearer ${this.bearerToken}`
+        };
       }
       
       const response = await this.api.post('/subscriptions', {
@@ -142,7 +149,7 @@ class NOWPaymentsService {
         success_url: `${this.frontendUrl}/billing?success=1`,
         cancel_url: `${this.frontendUrl}/billing?cancelled=1`,
         order_id: `sub_${userId}_${Date.now()}` // Unique order ID
-      }, { headers });
+      }, requestConfig);
       
       console.log('Subscription created successfully:', {
         subscriptionId: response.data?.id,
@@ -218,6 +225,15 @@ class NOWPaymentsService {
    */
   async createPayment(orderData) {
     try {
+      // Debug API key issue
+      console.log('Creating payment with API key:', {
+        hasApiKey: !!this.apiKey,
+        apiKeyLength: this.apiKey?.length,
+        apiKeyEnd: this.apiKey?.slice(-4),
+        sandbox: this.sandbox,
+        apiUrl: this.apiUrl
+      });
+      
       const orderId = `credit_${orderData.userId}_${Date.now()}_${uuidv4().slice(0, 8)}`;
       
       const response = await this.api.post('/payment', {
