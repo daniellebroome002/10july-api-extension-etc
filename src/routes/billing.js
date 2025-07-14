@@ -300,8 +300,18 @@ router.get('/plans', async (req, res) => {
 router.get('/history', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    const limit = parseInt(req.query.limit) || 50;
-    const offset = parseInt(req.query.offset) || 0;
+    
+    // Ensure limit and offset are valid integers
+    let limit = parseInt(req.query.limit);
+    let offset = parseInt(req.query.offset);
+    
+    // Set defaults and validate
+    if (isNaN(limit) || limit < 1 || limit > 100) {
+      limit = 50;
+    }
+    if (isNaN(offset) || offset < 0) {
+      offset = 0;
+    }
     
     // Get credit purchases
     const [creditPurchases] = await pool.execute(`

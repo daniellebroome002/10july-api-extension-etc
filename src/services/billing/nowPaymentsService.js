@@ -7,12 +7,29 @@ class NOWPaymentsService {
     this.apiKey = process.env.NOWPAYMENTS_API_KEY;
     this.ipnSecret = process.env.NOWPAYMENTS_IPN_SECRET;
     this.sandbox = process.env.NOWPAYMENTS_SANDBOX === 'true';
+    this.backendUrl = process.env.BACKEND_URL || process.env.API_URL || 'http://localhost:3000';
+    this.frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    
     this.apiUrl = this.sandbox 
       ? 'https://api-sandbox.nowpayments.io/v1'
       : 'https://api.nowpayments.io/v1';
     
+    // Debug environment variables
+    console.log('NOWPayments Service initialized:', {
+      hasApiKey: !!this.apiKey,
+      hasIpnSecret: !!this.ipnSecret,
+      sandbox: this.sandbox,
+      backendUrl: this.backendUrl,
+      frontendUrl: this.frontendUrl,
+      apiUrl: this.apiUrl
+    });
+    
     if (!this.apiKey) {
-      throw new Error('NOWPAYMENTS_API_KEY is required');
+      throw new Error('NOWPAYMENTS_API_KEY is required in environment variables');
+    }
+    
+    if (!this.ipnSecret) {
+      console.warn('NOWPAYMENTS_IPN_SECRET is missing - webhooks will not work');
     }
     
     // Initialize axios instance with default headers
@@ -88,21 +105,41 @@ class NOWPaymentsService {
    * @param {string} userId - User ID
    * @param {string} planId - NOWPayments plan ID
    * @param {string} customerEmail - Customer email
-   * @returns {Object} Subscription data with payment link
+   * @returns {Object} Subscription data
    */
   async createSubscription(userId, planId, customerEmail) {
     try {
-      const response = await this.api.post('/subscriptions', {
+      // Subscriptions require Bearer token authentication instead of x-api-key
+      const response = await axios.post(`${this.apiUrl}/subscriptions`, {
         plan_id: planId,
         customer_email: customerEmail,
-        ipn_callback_url: `${process.env.BACKEND_URL}/webhooks/nowpayments`,
-        success_url: `${process.env.FRONTEND_URL}/billing?success=1`,
-        cancel_url: `${process.env.FRONTEND_URL}/billing?cancelled=1`,
+        ipn_callback_url: `${this.backendUrl}/webhooks/nowpayments`,
+        success_url: `${this.frontendUrl}/billing?success=1`,
+        cancel_url: `${this.frontendUrl}/billing?cancelled=1`,
         order_id: `sub_${userId}_${Date.now()}` // Unique order ID
+      }, {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000
+      });
+      
+      console.log('Subscription created successfully:', {
+        subscriptionId: response.data?.id,
+        planId,
+        customerEmail
       });
       
       return response.data;
     } catch (error) {
+      console.error('Subscription creation failed:', {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        planId,
+        customerEmail
+      });
       throw new Error(`Failed to create subscription: ${error.response?.data?.message || error.message}`);
     }
   }
@@ -114,7 +151,13 @@ class NOWPaymentsService {
    */
   async getSubscription(subscriptionId) {
     try {
-      const response = await this.api.get(`/subscriptions/${subscriptionId}`);
+      const response = await axios.get(`${this.apiUrl}/subscriptions/${subscriptionId}`, {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000
+      });
       return response.data;
     } catch (error) {
       throw new Error(`Failed to get subscription: ${error.response?.data?.message || error.message}`);
@@ -128,7 +171,13 @@ class NOWPaymentsService {
    */
   async cancelSubscription(subscriptionId) {
     try {
-      const response = await this.api.delete(`/subscriptions/${subscriptionId}`);
+      const response = await axios.delete(`${this.apiUrl}/subscriptions/${subscriptionId}`, {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000
+      });
       return response.data;
     } catch (error) {
       throw new Error(`Failed to cancel subscription: ${error.response?.data?.message || error.message}`);
@@ -151,9 +200,9 @@ class NOWPaymentsService {
         price_currency: orderData.currency || 'usd',
         order_id: orderId,
         order_description: `Boomlify Credits: ${orderData.credits} credits`,
-        ipn_callback_url: `${process.env.BACKEND_URL}/webhooks/nowpayments`,
-        success_url: `${process.env.FRONTEND_URL}/billing?success=1&order=${orderId}`,
-        cancel_url: `${process.env.FRONTEND_URL}/billing?cancelled=1&order=${orderId}`,
+        ipn_callback_url: `${this.backendUrl}/webhooks/nowpayments`,
+        success_url: `${this.frontendUrl}/billing?success=1&order=${orderId}`,
+        cancel_url: `${this.frontendUrl}/billing?cancelled=1&order=${orderId}`,
         is_fee_paid_by_user: false, // We pay the fees
         // Custom fields for our tracking
         case: JSON.stringify({

@@ -357,8 +357,8 @@ class CreditManager {
   calculateCreditCost(timeTier) {
     const costs = {
       '10min': 1,
-      '1hour': 2, 
-      '1day': 3
+      '1hour': 5, 
+      '1day': 25
     };
     return costs[timeTier] || 1;
   }
