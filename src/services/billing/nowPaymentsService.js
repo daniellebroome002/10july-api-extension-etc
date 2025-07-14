@@ -22,31 +22,38 @@ class NOWPaymentsService {
       ? 'https://api-sandbox.nowpayments.io/v1'
       : 'https://api.nowpayments.io/v1';
     
-    // Debug environment variables
+    // Enhanced debugging for environment variables
     console.log('NOWPayments Service initialized:', {
       hasApiKey: !!this.apiKey,
       hasIpnSecret: !!this.ipnSecret,
       sandbox: this.sandbox,
       backendUrl: this.backendUrl,
       frontendUrl: this.frontendUrl,
-      apiUrl: this.apiUrl
+      apiUrl: this.apiUrl,
+      hasBearerToken: !!this.bearerToken
     });
+    
+    if (!this.bearerToken) {
+      console.warn(
+        '🚨 NOWPAYMENTS_BEARER_TOKEN is NOT set. ' +
+        'Subscription API calls will fail with a 401 Unauthorized error.'
+      );
+    }
     
     if (!this.apiKey) {
       throw new Error('NOWPAYMENTS_API_KEY is required in environment variables');
     }
     
     if (!this.ipnSecret) {
-      console.warn('NOWPAYMENTS_IPN_SECRET is missing - webhooks will not work');
+      console.warn('NOWPAYMENTS_IPN_SECRET is missing - webhook signature validation will be skipped');
     }
     
-    // Initialize axios instance with default headers
+    // Initialize axios instance with all possible headers
     this.api = axios.create({
       baseURL: this.apiUrl,
       headers: {
         'x-api-key': this.apiKey,
-        'Content-Type': 'application/json',
-        ...(this.bearerToken ? { 'Authorization': `Bearer ${this.bearerToken}` } : {})
+        'Content-Type': 'application/json'
       },
       timeout: 30000
     });
@@ -123,9 +130,11 @@ class NOWPaymentsService {
    */
   async createSubscription(userId, planId, customerEmail) {
     try {
-      // Attach bearer token if available
-      const headers = this.bearerToken ? { Authorization: `Bearer ${this.bearerToken}` } : {};
-
+      const headers = {};
+      if (this.bearerToken) {
+        headers.Authorization = `Bearer ${this.bearerToken}`;
+      }
+      
       const response = await this.api.post('/subscriptions', {
         plan_id: planId,
         customer_email: customerEmail,
@@ -143,6 +152,16 @@ class NOWPaymentsService {
       
       return response.data;
     } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message;
+      
+      // Provide a more helpful error if the token is missing
+      if (error.response?.status === 401 && !this.bearerToken) {
+        throw new Error(
+          'Failed to create subscription: NOWPayments returned 401 Unauthorized. ' +
+          'This is likely because the NOWPAYMENTS_BEARER_TOKEN environment variable is missing or invalid.'
+        );
+      }
+      
       console.error('Subscription creation failed:', {
         status: error.response?.status,
         statusText: error.response?.statusText,
@@ -150,7 +169,7 @@ class NOWPaymentsService {
         planId,
         customerEmail
       });
-      throw new Error(`Failed to create subscription: ${error.response?.data?.message || error.message}`);
+      throw new Error(`Failed to create subscription: ${errorMessage}`);
     }
   }
   
@@ -161,7 +180,11 @@ class NOWPaymentsService {
    */
   async getSubscription(subscriptionId) {
     try {
-      const response = await this.api.get(`/subscriptions/${subscriptionId}`);
+      const headers = {};
+      if (this.bearerToken) {
+        headers.Authorization = `Bearer ${this.bearerToken}`;
+      }
+      const response = await this.api.get(`/subscriptions/${subscriptionId}`, { headers });
       return response.data;
     } catch (error) {
       throw new Error(`Failed to get subscription: ${error.response?.data?.message || error.message}`);
@@ -175,7 +198,10 @@ class NOWPaymentsService {
    */
   async cancelSubscription(subscriptionId) {
     try {
-      const headers = this.bearerToken ? { Authorization: `Bearer ${this.bearerToken}` } : {};
+      const headers = {};
+      if (this.bearerToken) {
+        headers.Authorization = `Bearer ${this.bearerToken}`;
+      }
       const response = await this.api.delete(`/subscriptions/${subscriptionId}`, { headers });
       return response.data;
     } catch (error) {
