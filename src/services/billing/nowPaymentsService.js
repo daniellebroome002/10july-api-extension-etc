@@ -9,6 +9,14 @@ class NOWPaymentsService {
     this.sandbox = process.env.NOWPAYMENTS_SANDBOX === 'true';
     this.backendUrl = process.env.BACKEND_URL || process.env.API_URL || 'http://localhost:3000';
     this.frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    // Optional bearer token for NOWPayments Subscriptions API (expires ~5 min)
+    // The dashboard shows a second key (often labelled "Public Key" or similar).
+    // If provided via NOWPAYMENTS_BEARER_TOKEN, we will automatically attach it
+    // as `Authorization: Bearer <token>` when calling subscription endpoints.
+    // If not set, we will still call the endpoints but they will likely return
+    // 401 AUTH_REQUIRED – in that case the operator must supply / refresh the
+    // token in the Render.com environment variables.
+    this.bearerToken = process.env.NOWPAYMENTS_BEARER_TOKEN || null;
     
     this.apiUrl = this.sandbox 
       ? 'https://api-sandbox.nowpayments.io/v1'
@@ -37,7 +45,8 @@ class NOWPaymentsService {
       baseURL: this.apiUrl,
       headers: {
         'x-api-key': this.apiKey,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        ...(this.bearerToken ? { 'Authorization': `Bearer ${this.bearerToken}` } : {})
       },
       timeout: 30000
     });
@@ -114,7 +123,9 @@ class NOWPaymentsService {
    */
   async createSubscription(userId, planId, customerEmail) {
     try {
-      // Try using x-api-key authentication (via this.api) for subscriptions
+      // Attach bearer token if available
+      const headers = this.bearerToken ? { Authorization: `Bearer ${this.bearerToken}` } : {};
+
       const response = await this.api.post('/subscriptions', {
         plan_id: planId,
         customer_email: customerEmail,
@@ -122,7 +133,7 @@ class NOWPaymentsService {
         success_url: `${this.frontendUrl}/billing?success=1`,
         cancel_url: `${this.frontendUrl}/billing?cancelled=1`,
         order_id: `sub_${userId}_${Date.now()}` // Unique order ID
-      });
+      }, { headers });
       
       console.log('Subscription created successfully:', {
         subscriptionId: response.data?.id,
@@ -164,7 +175,8 @@ class NOWPaymentsService {
    */
   async cancelSubscription(subscriptionId) {
     try {
-      const response = await this.api.delete(`/subscriptions/${subscriptionId}`);
+      const headers = this.bearerToken ? { Authorization: `Bearer ${this.bearerToken}` } : {};
+      const response = await this.api.delete(`/subscriptions/${subscriptionId}`, { headers });
       return response.data;
     } catch (error) {
       throw new Error(`Failed to cancel subscription: ${error.response?.data?.message || error.message}`);
