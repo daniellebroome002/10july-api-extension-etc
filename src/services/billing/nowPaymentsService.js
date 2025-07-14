@@ -38,10 +38,10 @@ class NOWPaymentsService {
     });
     
     if (!this.bearerToken) {
-      console.warn(
-        '⚠️ NOWPAYMENTS_BEARER_TOKEN is NOT set. ' +
-        'Will try using API key as Bearer token for subscription calls. ' +
-        'If you experience 401 errors, set NOWPAYMENTS_BEARER_TOKEN in your environment.'
+      console.log(
+        '💡 NOWPAYMENTS_BEARER_TOKEN is not set. ' +
+        'Using payment-based subscriptions instead of NOWPayments subscription API. ' +
+        'This is the recommended approach for single-merchant applications.'
       );
     }
     
@@ -109,80 +109,96 @@ class NOWPaymentsService {
    * @param {Object} planData - Plan configuration
    * @returns {Object} Created plan data
    */
-  async createSubscriptionPlan(planData) {
-    try {
-      // Build headers for subscription plan creation
-      const requestConfig = {};
-      // Try using API key as Bearer token if no separate bearer token is provided
-      const tokenToUse = this.bearerToken || this.apiKey;
-      if (tokenToUse) {
-        requestConfig.headers = {
-          Authorization: `Bearer ${tokenToUse}`
-        };
+  /**
+   * Get available subscription plans (now using local definitions instead of NOWPayments plans)
+   * @returns {Array} Available plans
+   */
+  getAvailablePlans() {
+    return [
+      {
+        id: '183275633',
+        name: 'Premium Monthly',
+        amount: 9.00,
+        currency: 'USD',
+        credits: 3000,
+        description: '3,000 credits monthly + API access',
+        interval: 'monthly'
+      },
+      {
+        id: '1502143114', 
+        name: 'Premium Plus Monthly',
+        amount: 29.00,
+        currency: 'USD',
+        credits: 15000,
+        description: '15,000 credits monthly + priority support',
+        interval: 'monthly'
       }
-      
-      const response = await this.api.post('/subscriptions/plans', {
-        title: planData.title,
-        amount: planData.amount,
-        currency: planData.currency || 'usd',
-        interval_day: planData.interval_day || 30,
-        trial_period_day: planData.trial_period_day || 0,
-        is_active: true
-      }, requestConfig);
-      
-      return response.data;
-    } catch (error) {
-      throw new Error(`Failed to create subscription plan: ${error.response?.data?.message || error.message}`);
-    }
+    ];
   }
   
   /**
-   * Create a subscription for a user
+   * Create a subscription-like payment using NOWPayments invoice (works with API key only)
    * @param {string} userId - User ID
-   * @param {string} planId - NOWPayments plan ID
+   * @param {string} planId - Internal plan ID
    * @param {string} customerEmail - Customer email
-   * @returns {Object} Subscription data
+   * @returns {Object} Payment data with payment link
    */
   async createSubscription(userId, planId, customerEmail) {
     try {
-      // Build headers properly - don't overwrite the default headers!
-      const requestConfig = {};
-      // Try using API key as Bearer token if no separate bearer token is provided
-      const tokenToUse = this.bearerToken || this.apiKey;
-      if (tokenToUse) {
-        requestConfig.headers = {
-          Authorization: `Bearer ${tokenToUse}`
-        };
+      // Map internal plan IDs to prices (since we can't use NOWPayments subscription plans)
+      const planPrices = {
+        '183275633': { amount: 9.00, name: 'Premium Monthly', credits: 3000 },
+        '1502143114': { amount: 29.00, name: 'Premium Plus Monthly', credits: 15000 }
+      };
+      
+      const plan = planPrices[planId];
+      if (!plan) {
+        throw new Error(`Unknown plan ID: ${planId}`);
       }
       
-      const response = await this.api.post('/subscriptions', {
-        plan_id: planId,
-        customer_email: customerEmail,
-        ipn_callback_url: `${this.backendUrl}/webhooks/nowpayments`,
-        success_url: `${this.frontendUrl}/billing?success=1`,
-        cancel_url: `${this.frontendUrl}/billing?cancelled=1`,
-        order_id: `sub_${userId}_${Date.now()}` // Unique order ID
-      }, requestConfig);
+      const orderId = `sub_${userId}_${Date.now()}`;
       
-      console.log('Subscription created successfully:', {
-        subscriptionId: response.data?.id,
+      console.log('Creating subscription payment via invoice:', {
         planId,
-        customerEmail
+        userId,
+        customerEmail,
+        amount: plan.amount,
+        orderId
       });
       
-      return response.data;
+      // Use createPayment instead of subscriptions endpoint (works with API key only)
+      const response = await this.createPayment({
+        price_amount: plan.amount,
+        price_currency: 'usd',
+        order_id: orderId,
+        order_description: `${plan.name} - ${plan.credits} credits monthly`,
+        success_url: `${this.frontendUrl}/billing?success=1&plan=${planId}`,
+        cancel_url: `${this.frontendUrl}/billing?cancelled=1`,
+        customer_email: customerEmail,
+        ipn_callback_url: `${this.backendUrl}/webhooks/nowpayments`
+      });
+      
+      console.log('Subscription payment created successfully:', {
+        paymentId: response.payment_id,
+        orderId,
+        paymentUrl: response.pay_url
+      });
+      
+             // Return in subscription-like format for compatibility
+       return {
+         id: response.payment_id,
+         plan_id: planId,
+         customer_email: customerEmail,
+         order_id: orderId,
+         payment_url: response.pay_url,
+         pay_url: response.pay_url, // Alternative field name for compatibility
+         status: 'pending',
+         amount: plan.amount,
+         currency: 'USD',
+         credits: plan.credits
+       };
+      
     } catch (error) {
-      const errorMessage = error.response?.data?.message || error.message;
-      
-      // Provide a more helpful error for authentication issues
-      if (error.response?.status === 401) {
-        throw new Error(
-          'Failed to create subscription: NOWPayments returned 401 Unauthorized. ' +
-          `Tried using ${this.bearerToken ? 'NOWPAYMENTS_BEARER_TOKEN' : 'API key as Bearer token'}. ` +
-          'Check your NOWPayments credentials or try setting NOWPAYMENTS_BEARER_TOKEN if you have a separate JWT token.'
-        );
-      }
-      
       console.error('Subscription creation failed:', {
         status: error.response?.status,
         statusText: error.response?.statusText,
@@ -190,47 +206,42 @@ class NOWPaymentsService {
         planId,
         customerEmail
       });
-      throw new Error(`Failed to create subscription: ${errorMessage}`);
+      throw new Error(`Failed to create subscription: ${error.message}`);
     }
   }
   
   /**
-   * Get subscription details
-   * @param {string} subscriptionId - NOWPayments subscription ID
-   * @returns {Object} Subscription data
+   * Get payment details (replaces subscription details since we use payments now)
+   * @param {string} paymentId - NOWPayments payment ID
+   * @returns {Object} Payment data
    */
-  async getSubscription(subscriptionId) {
+  async getSubscription(paymentId) {
     try {
-      const headers = {};
-      // Try using API key as Bearer token if no separate bearer token is provided
-      const tokenToUse = this.bearerToken || this.apiKey;
-      if (tokenToUse) {
-        headers.Authorization = `Bearer ${tokenToUse}`;
-      }
-      const response = await this.api.get(`/subscriptions/${subscriptionId}`, { headers });
-      return response.data;
+      // Use getPaymentStatus instead since we're using payments, not subscriptions
+      return await this.getPaymentStatus(paymentId);
     } catch (error) {
-      throw new Error(`Failed to get subscription: ${error.response?.data?.message || error.message}`);
+      throw new Error(`Failed to get payment details: ${error.message}`);
     }
   }
   
   /**
-   * Cancel a subscription
-   * @param {string} subscriptionId - NOWPayments subscription ID
+   * Cancel a payment (limited functionality since crypto payments are irreversible)
+   * @param {string} paymentId - NOWPayments payment ID
    * @returns {Object} Cancellation result
    */
-  async cancelSubscription(subscriptionId) {
+  async cancelSubscription(paymentId) {
     try {
-      const headers = {};
-      // Try using API key as Bearer token if no separate bearer token is provided
-      const tokenToUse = this.bearerToken || this.apiKey;
-      if (tokenToUse) {
-        headers.Authorization = `Bearer ${tokenToUse}`;
-      }
-      const response = await this.api.delete(`/subscriptions/${subscriptionId}`, { headers });
-      return response.data;
+      // Note: Crypto payments can't be cancelled once initiated
+      // This is mainly for UI compatibility
+      console.log(`Cancel requested for payment ${paymentId} - crypto payments cannot be cancelled once initiated`);
+      
+      return {
+        id: paymentId,
+        status: 'cancel_requested',
+        message: 'Crypto payments cannot be cancelled once initiated. Contact support if needed.'
+      };
     } catch (error) {
-      throw new Error(`Failed to cancel subscription: ${error.response?.data?.message || error.message}`);
+      throw new Error(`Failed to cancel payment: ${error.message}`);
     }
   }
   
