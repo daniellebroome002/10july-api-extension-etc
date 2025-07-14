@@ -272,22 +272,31 @@ router.get('/status', authenticateToken, async (req, res) => {
 });
 
 /**
- * Get available plans and credit packs
+ * GET /billing/plans
+ * Get available subscription plans (using local definitions)
  */
-router.get('/plans', async (req, res) => {
+router.get('/plans', authenticateToken, async (req, res) => {
   try {
+    // Get plans from the service (local definitions, no API call needed)
+    const plans = nowPaymentsService.getAvailablePlans();
+    
     res.json({
       success: true,
-      plans: {
-        subscriptions: SUBSCRIPTION_PLANS,
-        creditPacks: CREDIT_PACKS
-      }
+      plans: plans.map(plan => ({
+        id: plan.id,
+        name: plan.name,
+        amount: plan.amount,
+        currency: plan.currency,
+        credits: plan.credits,
+        description: plan.description,
+        interval: plan.interval
+      }))
     });
   } catch (error) {
-    console.error('Get plans error:', error);
+    console.error('Error fetching plans:', error);
     res.status(500).json({
-      error: 'Failed to get plans',
-      message: error.message
+      success: false,
+      error: 'Failed to fetch plans'
     });
   }
 });
